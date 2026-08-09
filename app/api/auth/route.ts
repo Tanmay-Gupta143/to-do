@@ -1,17 +1,16 @@
 import { NextResponse } from "next/server";
 
 import { COOKIE_NAME, requestSession, serializeSession, sessionForMember, SESSION_AGE } from "../../../lib/auth";
-import { findMember, passwordMatches, recordSuccessfulLogin } from "../../../lib/members";
+import { recordSuccessfulLogin, verifyMember } from "../../../lib/members";
 
 const setSessionCookie = (response: NextResponse, value: string, maxAge = SESSION_AGE) => response.cookies.set({ name: COOKIE_NAME, value, httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/", maxAge });
 
 export async function POST(request: Request) {
   const body = await request.json().catch(() => ({})) as { username?: string; password?: string };
-  const member = body.username ? await findMember(body.username) : null;
+  const member = body.username && body.password ? await verifyMember(body.username, body.password) : null;
   if (!member) return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
   if (member.status === "suspended") return NextResponse.json({ code: "ACCOUNT_SUSPENDED", error: "Your account is suspended. Please contact the admin for more information." }, { status: 403 });
   if (member.status === "expired") return NextResponse.json({ code: "CREDITS_EXPIRED", error: "Your account credits have expired. Please contact the admin." }, { status: 403 });
-  if (!body.password || !(await passwordMatches(body.password, member))) return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
   const activeMember = await recordSuccessfulLogin(member.id);
   const session = sessionForMember(activeMember);
   const response = NextResponse.json({ username: session.username, name: session.name, role: session.role, credits: session.credits });
