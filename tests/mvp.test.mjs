@@ -63,6 +63,15 @@ test("authentication failures render the account-access popup", () => {
   assert.match(page, /setLoginUsername\(""\); setLoginPassword\(""\); setLoginError\(""\)/);
 });
 
+test("sign-in shows a circular loading state and recovers from network errors", () => {
+  assert.match(page, /const \[loginSubmitting, setLoginSubmitting\] = useState\(false\)/);
+  assert.match(page, /setLoginSubmitting\(true\)/);
+  assert.match(page, /setLoginSubmitting\(false\)/);
+  assert.match(page, /className="loading-spinner"/);
+  assert.match(css, /\.loading-spinner/);
+  assert.match(css, /@keyframes sign-in-spin/);
+});
+
 test("IST calendar calculations do not depend on the device timezone", () => {
   assert.match(page, /new Date\(Date\.UTC\(year, month - 1, 1\)\)\.getUTCDay\(\)/);
   assert.match(page, /new Date\(`\$\{key\}-01T12:00:00Z`\)/);

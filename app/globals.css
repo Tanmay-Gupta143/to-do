@@ -521,6 +521,20 @@ h3 {
   color: var(--primary-foreground);
 }
 
+.primary-btn:disabled {
+  cursor: wait;
+  opacity: 0.78;
+}
+
+.loading-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: sign-in-spin 0.7s linear infinite;
+}
+
 .primary-btn:hover,
 .submit-btn:hover {
   background: #ff8a2b;
@@ -566,6 +580,10 @@ h3 {
   justify-content: flex-end;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+@keyframes sign-in-spin {
+  to { transform: rotate(360deg); }
 }
 
 @keyframes timer-enter {
