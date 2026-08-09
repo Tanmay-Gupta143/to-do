@@ -99,6 +99,14 @@ test("member identity and streak presentation are data-driven", () => {
   assert.doesNotMatch(page, /<strong>4 days<\/strong>/);
 });
 
+test("member avatars use consistent short names derived from full names", () => {
+  assert.match(page, /const shortName = \(fullName: string\)/);
+  assert.match(page, /if \(parts\[0\]\.length <= 2\) return parts\[0\]\.toUpperCase\(\)/);
+  assert.match(page, /shortName\(store\.displayName \|\| session\.name\)/);
+  assert.match(page, /shortName\(member\.name\)/);
+  assert.doesNotMatch(page, /member\.name\.slice\(0, 2\)\.toUpperCase\(\)/);
+});
+
 test("member deletion is admin-only and logout lives in settings", async () => {
   const route = await readFile(new URL("../app/api/members/route.ts", import.meta.url), "utf8");
   assert.match(route, /export async function DELETE/);
