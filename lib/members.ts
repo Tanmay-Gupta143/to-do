@@ -75,6 +75,16 @@ async function readMembers(): Promise<MemberFile> {
     const parsed = JSON.parse(await readFile(dataFile(), "utf8")) as MemberFile;
     if (!Array.isArray(parsed.members)) throw new Error("Invalid member store");
     cached = parsed;
+    const configuredAdminUsername = cleanUsername(process.env.ADMIN_USERNAME || "tanmay-admin");
+    const configuredAdminPassword = process.env.ADMIN_PASSWORD || "tavash123";
+    const legacyAdmin = cached.members.find((member) => member.role === "admin" && member.username === "admin");
+    if (legacyAdmin && configuredAdminUsername !== "admin") {
+      const credentials = await hashPassword(configuredAdminPassword);
+      legacyAdmin.username = configuredAdminUsername;
+      legacyAdmin.passwordHash = credentials.passwordHash;
+      legacyAdmin.passwordSalt = credentials.passwordSalt;
+      await persistMembers(cached);
+    }
   } catch {
     cached = await seedMembers();
     await persistMembers(cached);
