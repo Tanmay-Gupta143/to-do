@@ -18,11 +18,11 @@ test("the auth endpoint rejects anonymous requests and accepts the default admin
   const login = await fetch("http://localhost:5173/api/auth", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ username: "admin", password: "admin123" }),
+    body: JSON.stringify({ username: "tanmay-admin", password: "tavash123" }),
   });
   assert.equal(login.status, 200);
   const loginPayload = await login.json();
-  assert.equal(loginPayload.username, "admin");
+  assert.equal(loginPayload.username, "tanmay-admin");
   assert.equal(loginPayload.role, "admin");
   assert.equal(typeof loginPayload.name, "string");
 });

@@ -63,7 +63,7 @@ async function seededMember(name: string, username: string, password: string, ro
 async function seedMembers(): Promise<MemberFile> {
   return {
     members: [
-      await seededMember(process.env.ADMIN_NAME || "Tanmay", process.env.ADMIN_USERNAME || "admin", process.env.ADMIN_PASSWORD || "admin123", "admin"),
+      await seededMember(process.env.ADMIN_NAME || "Tanmay", process.env.ADMIN_USERNAME || "tanmay-admin", process.env.ADMIN_PASSWORD || "tavash123", "admin"),
       await seededMember("Student", process.env.USER_USERNAME || "student", process.env.USER_PASSWORD || "study123", "user"),
     ],
   };

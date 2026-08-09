@@ -5,7 +5,7 @@
 The app now requires a signed-in credential. Defaults are provided for local development:
 
 - Student: `student` / `study123`
-- Admin: `admin` / `admin123`
+- Admin: `tanmay-admin` / `tavash123`
 
 Set `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `USER_USERNAME`, `USER_PASSWORD`, and `AUTH_SECRET` in the environment before deployment. Change the default admin password before exposing the app beyond local development. The Admin navigation is only returned to sessions authenticated with the admin credentials.
 
