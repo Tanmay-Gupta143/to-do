@@ -10,6 +10,10 @@ const adminSession = async (request: Request) => {
   return member && member.role === "admin" && member.status === "active" ? member : null;
 };
 const errorResponse = (error: unknown) => NextResponse.json({ error: error instanceof Error ? error.message : "Request failed." }, { status: 400 });
+const sameOrigin = (request: Request) => {
+  const origin = request.headers.get("origin");
+  return !origin || origin === new URL(request.url).origin;
+};
 
 export async function GET(request: Request) {
   if (!await adminSession(request)) return NextResponse.json({ error: "Admin access required." }, { status: 403 });
@@ -17,6 +21,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
   if (!await adminSession(request)) return NextResponse.json({ error: "Admin access required." }, { status: 403 });
   const body = await request.json().catch(() => ({})) as { name?: string; username?: string; password?: string; confirmPassword?: string; credits?: number };
   if (!body.name || !body.username || !body.password || body.password !== body.confirmPassword) return NextResponse.json({ error: "Name, username, password, and matching password confirmation are required." }, { status: 400 });
@@ -25,6 +30,7 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
+  if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
   if (!await adminSession(request)) return NextResponse.json({ error: "Admin access required." }, { status: 403 });
   const body = await request.json().catch(() => ({})) as { id?: string; credits?: number; action?: string };
   if (!body.id) return errorResponse(new Error("Member id is required."));
@@ -36,6 +42,7 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
   const session = await adminSession(request);
   if (!session) return NextResponse.json({ error: "Admin access required." }, { status: 403 });
   const body = await request.json().catch(() => ({})) as { id?: string };

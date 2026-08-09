@@ -36,8 +36,9 @@ type Member = { id: string; name: string; username: string; role: "user" | "admi
 const STORAGE_KEY = "daily-study-tracker-mvp";
 const SETUP_SECONDS = 15 * 60;
 const TIME_ZONE = "Asia/Kolkata";
-const SUSPENDED_MESSAGE = "Your account is suspended. Please contact the admin for more information.";
-const EXPIRED_MESSAGE = "Your account credits have expired. Please contact the admin.";
+const CONTACT_EMAIL = "kingluther12345@gmail.com";
+const SUSPENDED_MESSAGE = `This account was suspended after 4 days of inactivity. Contact the admin at ${CONTACT_EMAIL} for more information.`;
+const EXPIRED_MESSAGE = `This account has no credits remaining. Contact the admin at ${CONTACT_EMAIL} for more information.`;
 const blankStore: Store = { records: {}, reminderTime: "20:00", displayName: "Tanmay" };
 
 const shortName = (fullName: string) => {

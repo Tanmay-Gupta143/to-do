@@ -56,9 +56,9 @@ test("the admin navigation is role-gated and the demo label is removed", () => {
 
 test("authentication failures render the account-access popup", () => {
   assert.match(page, /role="alertdialog"/);
-  assert.match(page, /Your account is suspended\. Please contact the admin for more information\./);
-  assert.match(page, /Your account credits have expired\. Please contact the admin\./);
-  assert.match(page, /Invalid username or password/);
+  assert.match(page, /kingluther12345@gmail\.com/);
+  assert.match(page, /This account was suspended after 4 days of inactivity/);
+  assert.match(page, /This account has no credits remaining/);
   assert.match(page, /setLoginError\(""\)/);
   assert.match(page, /setLoginUsername\(""\); setLoginPassword\(""\); setLoginError\(""\)/);
 });
@@ -133,6 +133,17 @@ test("member access expires credits daily and supports reversible suspension", a
   assert.match(memberRoute, /body\.action === "restore"/);
   assert.match(memberRoute, /const adminSession = async/);
   assert.match(page, /SUSPENDED_MESSAGE/);
+});
+
+test("authentication hardening blocks default credentials and cross-origin mutations", async () => {
+  const members = await readFile(new URL("../lib/members.ts", import.meta.url), "utf8");
+  const authRoute = await readFile(new URL("../app/api/auth/route.ts", import.meta.url), "utf8");
+  const memberRoute = await readFile(new URL("../app/api/members/route.ts", import.meta.url), "utf8");
+  assert.match(members, /Member seed credentials must be configured/);
+  assert.doesNotMatch(members, /tavash123|study123/);
+  assert.match(authRoute, /LOGIN_MAX_ATTEMPTS = 5/);
+  assert.match(authRoute, /Invalid request origin/);
+  assert.match(memberRoute, /const sameOrigin =/);
 });
 
 test("Supabase member persistence is configured for production", async () => {

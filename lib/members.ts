@@ -115,10 +115,18 @@ async function seededMember(name: string, username: string, password: string, ro
 }
 
 async function seedMembers(): Promise<MemberFile> {
+  const adminName = process.env.ADMIN_NAME;
+  const adminUsername = process.env.ADMIN_USERNAME;
+  const adminPassword = process.env.ADMIN_PASSWORD;
+  const userUsername = process.env.USER_USERNAME;
+  const userPassword = process.env.USER_PASSWORD;
+  if (!adminName || !adminUsername || !adminPassword || !userUsername || !userPassword) {
+    throw new Error("Member seed credentials must be configured; refusing to create default accounts.");
+  }
   return {
     members: [
-      await seededMember(process.env.ADMIN_NAME || "Tanmay", process.env.ADMIN_USERNAME || "tanmay-admin", process.env.ADMIN_PASSWORD || "tavash123", "admin"),
-      await seededMember("Student", process.env.USER_USERNAME || "student", process.env.USER_PASSWORD || "study123", "user"),
+      await seededMember(adminName, adminUsername, adminPassword, "admin"),
+      await seededMember("Student", userUsername, userPassword, "user"),
     ],
   };
 }
@@ -129,10 +137,10 @@ async function readMembers(): Promise<MemberFile> {
     const parsed = JSON.parse(await readFile(dataFile(), "utf8")) as MemberFile;
     if (!Array.isArray(parsed.members)) throw new Error("Invalid member store");
     cached = parsed;
-    const configuredAdminUsername = cleanUsername(process.env.ADMIN_USERNAME || "tanmay-admin");
-    const configuredAdminPassword = process.env.ADMIN_PASSWORD || "tavash123";
+    const configuredAdminUsername = process.env.ADMIN_USERNAME ? cleanUsername(process.env.ADMIN_USERNAME) : null;
+    const configuredAdminPassword = process.env.ADMIN_PASSWORD || null;
     const legacyAdmin = cached.members.find((member) => member.role === "admin" && member.username === "admin");
-    if (legacyAdmin && configuredAdminUsername !== "admin") {
+    if (legacyAdmin && configuredAdminUsername && configuredAdminPassword && configuredAdminUsername !== "admin") {
       const credentials = await hashPassword(configuredAdminPassword);
       legacyAdmin.username = configuredAdminUsername;
       legacyAdmin.passwordHash = credentials.passwordHash;
@@ -178,9 +186,9 @@ export async function findMember(username: string) {
 }
 
 export async function verifyMember(username: string, password: string) {
-  const configuredAdminUsername = cleanUsername(process.env.ADMIN_USERNAME || "tanmay-admin");
-  const configuredAdminPassword = process.env.ADMIN_PASSWORD || "tavash123";
-  if (cleanUsername(username) === configuredAdminUsername && password === configuredAdminPassword) {
+  const configuredAdminUsername = process.env.ADMIN_USERNAME ? cleanUsername(process.env.ADMIN_USERNAME) : null;
+  const configuredAdminPassword = process.env.ADMIN_PASSWORD || null;
+  if (configuredAdminUsername && configuredAdminPassword && cleanUsername(username) === configuredAdminUsername && password === configuredAdminPassword) {
     if (isSupabaseConfigured()) {
       const admin = (await readSupabaseMembers()).find((member) => member.role === "admin");
       if (admin) {
