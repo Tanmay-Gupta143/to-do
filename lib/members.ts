@@ -25,7 +25,7 @@ export type PublicMember = Omit<Member, "passwordHash" | "passwordSalt">;
 
 type MemberFile = { members: Member[] };
 
-const dataFile = () => process.env.MEMBERS_DATA_FILE || path.join(process.cwd(), ".data", "members.json");
+const dataFile = () => process.env.MEMBERS_DATA_FILE || (process.env.VERCEL ? "/tmp/daily-study-members.json" : path.join(process.cwd(), ".data", "members.json"));
 let cached: MemberFile | null = null;
 let writeQueue = Promise.resolve();
 
