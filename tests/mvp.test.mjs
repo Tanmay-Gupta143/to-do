@@ -131,6 +131,19 @@ test("member access expires credits daily and supports reversible suspension", a
   assert.match(page, /SUSPENDED_MESSAGE/);
 });
 
+test("Supabase member persistence is configured for production", async () => {
+  const members = await readFile(new URL("../lib/members.ts", import.meta.url), "utf8");
+  const client = await readFile(new URL("../lib/supabase-admin.ts", import.meta.url), "utf8");
+  const migration = await readFile(new URL("../supabase/migrations/001_create_members.sql", import.meta.url), "utf8");
+  assert.match(members, /readSupabaseMembers/);
+  assert.match(members, /from\("members"\)/);
+  assert.match(client, /SUPABASE_SERVICE_ROLE_KEY/);
+  assert.match(client, /autoRefreshToken: false/);
+  assert.match(migration, /create table if not exists public\.members/);
+  assert.match(migration, /username text not null unique/);
+  assert.match(migration, /enable row level security/);
+});
+
 test("user settings show the authenticated member credit balance", async () => {
   const auth = await readFile(new URL("../lib/auth.ts", import.meta.url), "utf8");
   const route = await readFile(new URL("../app/api/auth/route.ts", import.meta.url), "utf8");

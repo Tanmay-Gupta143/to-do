@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.112.2",
     "baseline-browser-mapping": "2.11.12",
     "lucide-react": "latest",
     "next": "16.2.10",

@@ -9,6 +9,17 @@ The app now requires a signed-in credential. Defaults are provided for local dev
 
 Set `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `USER_USERNAME`, `USER_PASSWORD`, and `AUTH_SECRET` in the environment before deployment. Change the default admin password before exposing the app beyond local development. The Admin navigation is only returned to sessions authenticated with the admin credentials.
 
+## Supabase member storage
+
+Production member accounts use the Supabase project configured for this app. Set these server-only variables in Vercel for Development, Preview, and Production:
+
+```text
+SUPABASE_URL=https://yidqhvejwlwvwicufkdi.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=<copy from Supabase Project Settings > API Keys>
+```
+
+Never prefix `SUPABASE_SERVICE_ROLE_KEY` with `NEXT_PUBLIC_` or expose it in browser code. Without both variables, local development continues using `.data/members.json`; Vercel must have them configured for durable member persistence.
+
 A clean full-stack starter running on
 [vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
 Drizzle support.
