@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { COOKIE_NAME, requestSession, serializeSession, sessionForMember, SESSION_AGE } from "../../../lib/auth";
-import { recordSuccessfulLogin, verifyMember } from "../../../lib/members";
+import { findMember, recordSuccessfulLogin, verifyMember } from "../../../lib/members";
 
 const setSessionCookie = (response: NextResponse, value: string, maxAge = SESSION_AGE) => response.cookies.set({ name: COOKIE_NAME, value, httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/", maxAge });
 
@@ -20,7 +20,14 @@ export async function POST(request: Request) {
 
 export async function GET(request: Request) {
   const session = requestSession(request);
-  return session ? NextResponse.json({ username: session.username, name: session.name, role: session.role, credits: session.credits }) : NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
+  if (!session) return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
+  const member = await findMember(session.username);
+  if (!member || member.status !== "active") {
+    const response = NextResponse.json({ error: "Session expired" }, { status: 401 });
+    setSessionCookie(response, "", 0);
+    return response;
+  }
+  return NextResponse.json({ username: member.username, name: member.name, role: member.role, credits: member.credits });
 }
 
 export async function DELETE() {

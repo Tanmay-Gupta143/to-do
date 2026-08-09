@@ -101,6 +101,8 @@ test("member identity and streak presentation are data-driven", () => {
 
 test("member avatars use consistent short names derived from full names", () => {
   assert.match(page, /const shortName = \(fullName: string\)/);
+  assert.match(page, /if \(parts\.length === 1\) return parts\[0\]\[0\]\.toUpperCase\(\)/);
+  assert.match(page, /if \(!parts\.length\) return "\?"/);
   assert.match(page, /if \(parts\[0\]\.length <= 2\) return parts\[0\]\.toUpperCase\(\)/);
   assert.match(page, /shortName\(store\.displayName \|\| session\.name\)/);
   assert.match(page, /shortName\(member\.name\)/);
@@ -110,7 +112,7 @@ test("member avatars use consistent short names derived from full names", () => 
 test("member deletion is admin-only and logout lives in settings", async () => {
   const route = await readFile(new URL("../app/api/members/route.ts", import.meta.url), "utf8");
   assert.match(route, /export async function DELETE/);
-  assert.match(route, /session\?\.role !== "admin"/);
+  assert.match(route, /const adminSession = async/);
   assert.match(page, /settings-logout/);
   assert.match(page, /admin-signout/);
   assert.doesNotMatch(page, /className="avatar" aria-label="Sign out"/);
@@ -127,17 +129,22 @@ test("member access expires credits daily and supports reversible suspension", a
   assert.match(members, /export async function restoreMember/);
   assert.match(authRoute, /ACCOUNT_SUSPENDED/);
   assert.match(authRoute, /CREDITS_EXPIRED/);
+  assert.match(authRoute, /findMember\(session\.username\)/);
   assert.match(memberRoute, /body\.action === "restore"/);
+  assert.match(memberRoute, /const adminSession = async/);
   assert.match(page, /SUSPENDED_MESSAGE/);
 });
 
 test("Supabase member persistence is configured for production", async () => {
   const members = await readFile(new URL("../lib/members.ts", import.meta.url), "utf8");
+  const auth = await readFile(new URL("../lib/auth.ts", import.meta.url), "utf8");
   const client = await readFile(new URL("../lib/supabase-admin.ts", import.meta.url), "utf8");
   const migration = await readFile(new URL("../supabase/migrations/001_create_members.sql", import.meta.url), "utf8");
   assert.match(members, /readSupabaseMembers/);
   assert.match(members, /from\("members"\)/);
   assert.match(client, /SUPABASE_SERVICE_ROLE_KEY/);
+  assert.match(auth, /AUTH_SECRET must be configured in production/);
+  assert.match(client, /must be configured in production/);
   assert.match(client, /autoRefreshToken: false/);
   assert.match(migration, /create table if not exists public\.members/);
   assert.match(migration, /username text not null unique/);

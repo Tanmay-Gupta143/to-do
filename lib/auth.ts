@@ -6,7 +6,10 @@ export type Session = { username: string; name: string; role: "user" | "admin"; 
 export const COOKIE_NAME = "daily_study_session";
 export const SESSION_AGE = 8 * 60 * 60;
 
-const secret = () => process.env.AUTH_SECRET || "daily-study-local-mvp-change-me";
+const secret = () => {
+  if (!process.env.AUTH_SECRET && process.env.NODE_ENV === "production") throw new Error("AUTH_SECRET must be configured in production.");
+  return process.env.AUTH_SECRET || "daily-study-local-mvp-change-me";
+};
 const encode = (value: string) => Buffer.from(value, "utf8").toString("base64url");
 const sign = (value: string) => createHmac("sha256", secret()).update(value).digest("base64url");
 

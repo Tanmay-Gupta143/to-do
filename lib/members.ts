@@ -187,6 +187,7 @@ export async function verifyMember(username: string, password: string) {
         const credentials = await hashPassword(configuredAdminPassword);
         return await updateSupabaseMember(admin.id, { username: configuredAdminUsername, ...credentials }) || admin;
       }
+      return null;
     }
     const file = await readMembers();
     const admin = file.members.find((member) => member.role === "admin");
@@ -315,7 +316,7 @@ export async function restoreMember(id: string) {
     const existing = (await readSupabaseMembers()).find((member) => member.id === id);
     if (!existing) throw new Error("Member not found.");
     const now = new Date().toISOString();
-    return publicMember(await updateSupabaseMember(id, { status: existing.credits > 0 ? "active" : "expired", lastLoginAt: now, lastCreditDeductedOn: istDateKey(), suspendedAt: undefined }) || existing);
+    return publicMember(await updateSupabaseMember(id, { status: existing.credits > 0 ? "active" : "expired", lastLoginAt: now, lastCreditDeductedOn: istDateKey(), suspendedAt: "" }) || existing);
   }
   let updated: PublicMember | null = null;
   await updateMembers((file) => ({ members: file.members.map((member) => {

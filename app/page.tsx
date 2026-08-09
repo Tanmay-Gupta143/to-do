@@ -42,7 +42,8 @@ const blankStore: Store = { records: {}, reminderTime: "20:00", displayName: "Ta
 
 const shortName = (fullName: string) => {
   const parts = fullName.trim().split(/\s+/).filter(Boolean);
-  if (!parts.length) return "??";
+  if (!parts.length) return "?";
+  if (parts.length === 1) return parts[0][0].toUpperCase();
   if (parts[0].length <= 2) return parts[0].toUpperCase();
   return `${parts[0][0]}${(parts.at(-1) || parts[0])[0]}`.toUpperCase();
 };
