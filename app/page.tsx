@@ -156,7 +156,7 @@ export default function Home() {
         if (cancelled) return;
         if (initial) syncHydrating.current = true;
         const merged = initial ? mergeInitialStores(data.store, localStore, session.name) : undefined;
-        setStore((current) => initial ? merged! : mergeStores(data.store, current, session.name));
+        setStore((current) => initial ? merged! : mergeInitialStores(data.store, current, session.name));
         setHydrated(true);
         setSyncReady(data.durable);
         setSyncError("");
