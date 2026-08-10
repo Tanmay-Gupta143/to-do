@@ -115,6 +115,7 @@ export default function Home() {
   const [now, setNow] = useState(Date.now());
   const [timerExpanded, setTimerExpanded] = useState(false);
   const [monthKey, setMonthKey] = useState(() => todayKey().slice(0, 7));
+  const syncHydrating = useRef(true);
   const today = todayKey();
   const record = store.records[today];
   const streak = useMemo(() => {
@@ -142,6 +143,7 @@ export default function Home() {
     setSyncReady(false);
     setSyncError("");
     if (!session) {
+      syncHydrating.current = false;
       setStore(localStore);
       setHydrated(true);
       return () => { cancelled = true; };
@@ -152,6 +154,7 @@ export default function Home() {
         if (!response.ok) throw new Error(`Load failed (${response.status}).`);
         const data = await response.json() as { store: Store | null; durable: boolean };
         if (cancelled) return;
+        if (initial) syncHydrating.current = true;
         const merged = initial ? mergeInitialStores(data.store, localStore, session.name) : undefined;
         setStore((current) => initial ? merged! : mergeStores(data.store, current, session.name));
         setHydrated(true);
@@ -161,6 +164,7 @@ export default function Home() {
           const migrationResponse = await fetch("/api/study-data", { method: "PUT", headers: { "content-type": "application/json" }, credentials: "same-origin", body: JSON.stringify({ store: merged }) });
           if (!migrationResponse.ok) throw new Error(`Migration failed (${migrationResponse.status}).`);
         }
+        if (initial) syncHydrating.current = false;
       } catch (error) {
         if (!cancelled) {
           if (initial) {
@@ -192,7 +196,7 @@ export default function Home() {
       .finally(() => setAuthLoading(false));
   }, []);
   useEffect(() => {
-    if (!hydrated || !syncReady) return;
+    if (!hydrated || !syncReady || syncHydrating.current) return;
     const requestId = ++syncRequest.current;
     const timer = window.setTimeout(() => {
       void fetch("/api/study-data", { method: "PUT", headers: { "content-type": "application/json" }, credentials: "same-origin", body: JSON.stringify({ store }) })
