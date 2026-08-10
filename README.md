@@ -20,6 +20,12 @@ SUPABASE_SERVICE_ROLE_KEY=<copy from Supabase Project Settings > API Keys>
 
 Never prefix `SUPABASE_SERVICE_ROLE_KEY` with `NEXT_PUBLIC_` or expose it in browser code. Without both variables, local development continues using `.data/members.json`; Vercel must have them configured for durable member persistence.
 
+## Durable study data
+
+The signed member session remains the application login. After login, the server resolves that session to the member row and stores the member's task/history document in `public.study_data`; the browser never chooses the owner. `study_data` is RLS-enabled, inaccessible to `anon` and `authenticated`, and writable only through the server-side service-role client after session verification.
+
+The first authenticated load merges the username-scoped browser record with the server record and saves the merged result. Merges are monotonic: records and tasks are unioned, completion/submission progress is preserved if either device has it, and stale local data cannot erase server progress. Local storage remains as a non-destructive fallback if durable storage is unavailable.
+
 A clean full-stack starter running on
 [vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
 Drizzle support.

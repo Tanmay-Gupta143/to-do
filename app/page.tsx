@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import quoteLibrary from "success-motivational-quotes";
 import {
   ArrowRight,
@@ -17,19 +17,11 @@ import {
   Sparkles,
   Trash2,
 } from "lucide-react";
+import { EMPTY_STORE, mergeStores, normalizeStore, type StudyDayRecord, type StudyStore, type StudyTask } from "../lib/study-data";
 
-type Task = { id: string; title: string; completed: boolean };
-type DayRecord = {
-  date: string;
-  scheduled: boolean;
-  setupStartedAt?: number;
-  activeSeconds: number;
-  setupComplete: boolean;
-  submitted: boolean;
-  submittedAt?: number;
-  tasks: Task[];
-};
-type Store = { records: Record<string, DayRecord>; reminderTime: string; displayName: string };
+type Task = StudyTask;
+type DayRecord = StudyDayRecord;
+type Store = StudyStore;
 type AuthSession = { username: string; name: string; role: "user" | "admin"; credits: number };
 type Member = { id: string; name: string; username: string; role: "user" | "admin"; credits: number; status: "active" | "suspended" | "expired"; lastLoginAt?: string; createdAt: string };
 
@@ -39,7 +31,7 @@ const TIME_ZONE = "Asia/Kolkata";
 const CONTACT_EMAIL = "kingluther12345@gmail.com";
 const SUSPENDED_MESSAGE = `This account was suspended after 4 days of inactivity. Contact the admin at ${CONTACT_EMAIL} for more information.`;
 const EXPIRED_MESSAGE = `This account has no credits remaining. Contact the admin at ${CONTACT_EMAIL} for more information.`;
-const blankStore: Store = { records: {}, reminderTime: "20:00", displayName: "Tanmay" };
+const blankStore: Store = EMPTY_STORE;
 
 const shortName = (fullName: string) => {
   const parts = fullName.trim().split(/\s+/).filter(Boolean);
@@ -91,7 +83,7 @@ function readStore(storageKey = STORAGE_KEY, defaultDisplayName = blankStore.dis
     }));
     const storedDisplayName = typeof parsed.displayName === "string" ? parsed.displayName.trim() : "";
     const displayName = !storedDisplayName || (storedDisplayName === blankStore.displayName && defaultDisplayName !== blankStore.displayName) ? defaultDisplayName : storedDisplayName;
-    return { ...blankStore, ...parsed, displayName, records };
+    return normalizeStore({ ...parsed, displayName, records }, defaultDisplayName);
   } catch {
     return { ...blankStore, displayName: defaultDisplayName };
   }
@@ -111,6 +103,8 @@ export default function Home() {
   const [memberNotice, setMemberNotice] = useState("");
   const [memberSaving, setMemberSaving] = useState(false);
   const [hydrated, setHydrated] = useState(false);
+  const [syncReady, setSyncReady] = useState(false);
+  const syncRequest = useRef(0);
   const [view, setView] = useState("today");
   const [newTitle, setNewTitle] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -140,8 +134,35 @@ export default function Home() {
   const storageKey = session ? `${STORAGE_KEY}:${session.username}` : STORAGE_KEY;
   useEffect(() => {
     if (authLoading) return;
-    setStore(readStore(session ? `${STORAGE_KEY}:${session.username}` : STORAGE_KEY, session?.name));
-    setHydrated(true);
+    let cancelled = false;
+    const localStore = readStore(session ? `${STORAGE_KEY}:${session.username}` : STORAGE_KEY, session?.name);
+    setSyncReady(false);
+    if (!session) {
+      setStore(localStore);
+      setHydrated(true);
+      return () => { cancelled = true; };
+    }
+    void fetch("/api/study-data", { credentials: "same-origin" })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error("Could not load study data.")))
+      .then(async (data: { store: Store | null; durable: boolean }) => {
+        if (cancelled) return;
+        const merged = mergeStores(data.store, localStore, session.name);
+        setStore(merged);
+        setHydrated(true);
+        if (data.durable) {
+          const response = await fetch("/api/study-data", { method: "PUT", headers: { "content-type": "application/json" }, credentials: "same-origin", body: JSON.stringify({ store: merged }) });
+          if (!response.ok) throw new Error("Could not migrate study data.");
+        }
+        if (!cancelled) setSyncReady(data.durable);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setStore(localStore);
+          setHydrated(true);
+          setSyncReady(false);
+        }
+      });
+    return () => { cancelled = true; };
   }, [authLoading, session?.username]);
   useEffect(() => {
     fetch("/api/auth", { credentials: "same-origin" })
@@ -150,6 +171,20 @@ export default function Home() {
       .catch(() => setSession(null))
       .finally(() => setAuthLoading(false));
   }, []);
+  useEffect(() => {
+    if (!hydrated || !syncReady) return;
+    const requestId = ++syncRequest.current;
+    const timer = window.setTimeout(() => {
+      void fetch("/api/study-data", { method: "PUT", headers: { "content-type": "application/json" }, credentials: "same-origin", body: JSON.stringify({ store }) })
+        .then((response) => response.ok ? response.json() as Promise<{ store: Store }> : Promise.reject(new Error("Could not save study data.")))
+        .then((data) => {
+          if (requestId !== syncRequest.current) return;
+          setStore((current) => JSON.stringify(current) === JSON.stringify(data.store) ? current : data.store);
+        })
+        .catch(() => undefined);
+    }, 450);
+    return () => window.clearTimeout(timer);
+  }, [hydrated, syncReady, store]);
   useEffect(() => {
     if (!hydrated) return;
     try { localStorage.setItem(storageKey, JSON.stringify(store)); } catch { /* Keep the in-memory session usable if storage is unavailable. */ }
