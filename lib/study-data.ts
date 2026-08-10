@@ -81,3 +81,19 @@ export function mergeStores(serverValue: unknown, clientValue: unknown, fallback
     displayName: client.displayName || server.displayName || fallbackName,
   };
 }
+
+/**
+ * During initial hydration, a durable record is authoritative for dates it
+ * already contains. Local-only dates still migrate, so an older browser
+ * cannot duplicate or overwrite an account's current server record.
+ */
+export function mergeInitialStores(serverValue: unknown, clientValue: unknown, fallbackName = EMPTY_STORE.displayName): StudyStore {
+  const server = normalizeStore(serverValue, fallbackName);
+  const client = normalizeStore(clientValue, fallbackName);
+  const records: Record<string, StudyDayRecord> = { ...client.records, ...server.records };
+  return {
+    records,
+    reminderTime: serverValue ? server.reminderTime : client.reminderTime,
+    displayName: serverValue ? server.displayName : client.displayName || fallbackName,
+  };
+}

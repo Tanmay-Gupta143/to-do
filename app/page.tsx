@@ -17,7 +17,7 @@ import {
   Sparkles,
   Trash2,
 } from "lucide-react";
-import { EMPTY_STORE, mergeStores, normalizeStore, type StudyDayRecord, type StudyStore, type StudyTask } from "../lib/study-data";
+import { EMPTY_STORE, mergeInitialStores, mergeStores, normalizeStore, type StudyDayRecord, type StudyStore, type StudyTask } from "../lib/study-data";
 
 type Task = StudyTask;
 type DayRecord = StudyDayRecord;
@@ -152,7 +152,7 @@ export default function Home() {
         if (!response.ok) throw new Error(`Load failed (${response.status}).`);
         const data = await response.json() as { store: Store | null; durable: boolean };
         if (cancelled) return;
-        const merged = initial ? mergeStores(data.store, localStore, session.name) : undefined;
+        const merged = initial ? mergeInitialStores(data.store, localStore, session.name) : undefined;
         setStore((current) => initial ? merged! : mergeStores(data.store, current, session.name));
         setHydrated(true);
         setSyncReady(data.durable);
