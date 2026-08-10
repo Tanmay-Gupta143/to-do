@@ -19,28 +19,29 @@ async function authenticatedMember(request: Request) {
   return member && member.status === "active" ? member : null;
 }
 
-const unauthorized = () => NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
+const noStore = { "Cache-Control": "no-store, max-age=0" };
+const unauthorized = () => NextResponse.json({ error: "Unauthenticated" }, { status: 401, headers: noStore });
 
 export async function GET(request: Request) {
   const member = await authenticatedMember(request);
   if (!member) return unauthorized();
-  if (!isSupabaseConfigured()) return NextResponse.json({ store: null, durable: false });
+  if (!isSupabaseConfigured()) return NextResponse.json({ store: null, durable: false }, { headers: noStore });
   try {
     const { data, error } = await supabaseAdmin().from("study_data").select("data").eq("member_id", member.id).maybeSingle();
     if (error) throw error;
-    return NextResponse.json({ store: data ? normalizeStore(data.data, member.name) : null, durable: true });
+    return NextResponse.json({ store: data ? normalizeStore(data.data, member.name) : null, durable: true }, { headers: noStore });
   } catch {
-    return NextResponse.json({ error: "Durable study storage is unavailable." }, { status: 503 });
+    return NextResponse.json({ error: "Durable study storage is unavailable." }, { status: 503, headers: noStore });
   }
 }
 
 export async function PUT(request: Request) {
-  if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
+  if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403, headers: noStore });
   const member = await authenticatedMember(request);
   if (!member) return unauthorized();
-  if (!isSupabaseConfigured()) return NextResponse.json({ error: "Durable storage is not configured." }, { status: 503 });
+  if (!isSupabaseConfigured()) return NextResponse.json({ error: "Durable storage is not configured." }, { status: 503, headers: noStore });
   const body = await request.json().catch(() => null) as { store?: StudyStore } | null;
-  if (!body?.store) return NextResponse.json({ error: "A study store is required." }, { status: 400 });
+  if (!body?.store) return NextResponse.json({ error: "A study store is required." }, { status: 400, headers: noStore });
   const clientStore = normalizeStore(body.store, member.name);
   try {
     const { data: existing, error: readError } = await supabaseAdmin().from("study_data").select("data").eq("member_id", member.id).maybeSingle();
@@ -48,8 +49,8 @@ export async function PUT(request: Request) {
     const merged = mergeStores(existing?.data, clientStore, member.name);
     const { error } = await supabaseAdmin().from("study_data").upsert({ member_id: member.id, data: merged }, { onConflict: "member_id" });
     if (error) throw error;
-    return NextResponse.json({ store: merged, durable: true });
+    return NextResponse.json({ store: merged, durable: true }, { headers: noStore });
   } catch {
-    return NextResponse.json({ error: "Durable study storage is unavailable." }, { status: 503 });
+    return NextResponse.json({ error: "Durable study storage is unavailable." }, { status: 503, headers: noStore });
   }
 }

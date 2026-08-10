@@ -104,6 +104,7 @@ export default function Home() {
   const [memberSaving, setMemberSaving] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const [syncReady, setSyncReady] = useState(false);
+  const [syncError, setSyncError] = useState("");
   const syncRequest = useRef(0);
   const [view, setView] = useState("today");
   const [newTitle, setNewTitle] = useState("");
@@ -139,32 +140,49 @@ export default function Home() {
       ? mergeStores(readStore(STORAGE_KEY, session.name), readStore(`${STORAGE_KEY}:${session.username}`, session.name), session.name)
       : readStore(STORAGE_KEY);
     setSyncReady(false);
+    setSyncError("");
     if (!session) {
       setStore(localStore);
       setHydrated(true);
       return () => { cancelled = true; };
     }
-    void fetch("/api/study-data", { credentials: "same-origin" })
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error("Could not load study data.")))
-      .then(async (data: { store: Store | null; durable: boolean }) => {
+    const loadDurable = async (initial = false) => {
+      try {
+        const response = await fetch("/api/study-data", { credentials: "same-origin", cache: "no-store" });
+        if (!response.ok) throw new Error(`Load failed (${response.status}).`);
+        const data = await response.json() as { store: Store | null; durable: boolean };
         if (cancelled) return;
-        const merged = mergeStores(data.store, localStore, session.name);
-        setStore(merged);
+        const merged = initial ? mergeStores(data.store, localStore, session.name) : undefined;
+        setStore((current) => initial ? merged! : mergeStores(data.store, current, session.name));
         setHydrated(true);
-        if (data.durable) {
-          const response = await fetch("/api/study-data", { method: "PUT", headers: { "content-type": "application/json" }, credentials: "same-origin", body: JSON.stringify({ store: merged }) });
-          if (!response.ok) throw new Error("Could not migrate study data.");
+        setSyncReady(data.durable);
+        setSyncError("");
+        if (initial && data.durable) {
+          const migrationResponse = await fetch("/api/study-data", { method: "PUT", headers: { "content-type": "application/json" }, credentials: "same-origin", body: JSON.stringify({ store: merged }) });
+          if (!migrationResponse.ok) throw new Error(`Migration failed (${migrationResponse.status}).`);
         }
-        if (!cancelled) setSyncReady(data.durable);
-      })
-      .catch(() => {
+      } catch (error) {
         if (!cancelled) {
-          setStore(localStore);
-          setHydrated(true);
+          if (initial) {
+            setStore(localStore);
+            setHydrated(true);
+          }
           setSyncReady(false);
+          setSyncError(error instanceof Error ? `Sync unavailable — retrying (${error.message})` : "Sync unavailable — retrying.");
         }
-      });
-    return () => { cancelled = true; };
+      }
+    };
+    void loadDurable(true);
+    const refresh = () => { if (document.visibilityState === "visible") void loadDurable(false); };
+    const interval = window.setInterval(refresh, 15000);
+    window.addEventListener("focus", refresh);
+    window.addEventListener("pageshow", refresh);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refresh);
+      window.removeEventListener("pageshow", refresh);
+    };
   }, [authLoading, session?.username]);
   useEffect(() => {
     fetch("/api/auth", { credentials: "same-origin" })
@@ -182,15 +200,16 @@ export default function Home() {
         .then((data) => {
           if (requestId !== syncRequest.current) return;
           setStore((current) => JSON.stringify(current) === JSON.stringify(data.store) ? current : data.store);
+          setSyncError("");
         })
-        .catch(() => undefined);
+        .catch((error) => setSyncError(error instanceof Error ? `Sync unavailable — retrying (${error.message})` : "Sync unavailable — retrying."));
     }, 450);
     return () => window.clearTimeout(timer);
   }, [hydrated, syncReady, store]);
   useEffect(() => {
-    if (!hydrated) return;
+    if (!hydrated || !session) return;
     try { localStorage.setItem(storageKey, JSON.stringify(store)); } catch { /* Keep the in-memory session usable if storage is unavailable. */ }
-  }, [hydrated, storageKey, store]);
+  }, [hydrated, session, storageKey, store]);
   useEffect(() => {
     const onVisibility = () => setVisible(document.visibilityState === "visible");
     const onBlur = () => setVisible(false);

@@ -105,6 +105,9 @@ test("member identity and streak presentation are data-driven", () => {
   assert.match(page, /type AuthSession = \{ username: string; name: string;/);
   assert.match(page, /readStore\(STORAGE_KEY, session\.name\)/);
   assert.match(page, /readStore\(`\$\{STORAGE_KEY\}:\$\{session\.username\}`, session\.name\)/);
+  assert.match(page, /cache: "no-store"/);
+  assert.match(page, /setInterval\(refresh, 15000\)/);
+  assert.match(page, /Sync unavailable/);
   assert.match(page, /while \(store\.records\[cursor\]\?\.submitted\)/);
   assert.doesNotMatch(page, /<strong>4 days<\/strong>/);
 });
