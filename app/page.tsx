@@ -137,7 +137,7 @@ export default function Home() {
     let cancelled = false;
     const localStore = session
       ? mergeStores(readStore(STORAGE_KEY, session.name), readStore(`${STORAGE_KEY}:${session.username}`, session.name), session.name)
-      : readStore(STORAGE_KEY, session?.name);
+      : readStore(STORAGE_KEY);
     setSyncReady(false);
     if (!session) {
       setStore(localStore);
