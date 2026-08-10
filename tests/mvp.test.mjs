@@ -103,7 +103,8 @@ test("the branded orange notebook icon is served and used by the app", async () 
 
 test("member identity and streak presentation are data-driven", () => {
   assert.match(page, /type AuthSession = \{ username: string; name: string;/);
-  assert.match(page, /readStore\(session \? `\$\{STORAGE_KEY\}:\$\{session\.username\}` : STORAGE_KEY, session\?\.name\)/);
+  assert.match(page, /readStore\(STORAGE_KEY, session\.name\)/);
+  assert.match(page, /readStore\(`\$\{STORAGE_KEY\}:\$\{session\.username\}`, session\.name\)/);
   assert.match(page, /while \(store\.records\[cursor\]\?\.submitted\)/);
   assert.doesNotMatch(page, /<strong>4 days<\/strong>/);
 });

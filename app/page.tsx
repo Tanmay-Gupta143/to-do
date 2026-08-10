@@ -135,7 +135,9 @@ export default function Home() {
   useEffect(() => {
     if (authLoading) return;
     let cancelled = false;
-    const localStore = readStore(session ? `${STORAGE_KEY}:${session.username}` : STORAGE_KEY, session?.name);
+    const localStore = session
+      ? mergeStores(readStore(STORAGE_KEY, session.name), readStore(`${STORAGE_KEY}:${session.username}`, session.name), session.name)
+      : readStore(STORAGE_KEY, session?.name);
     setSyncReady(false);
     if (!session) {
       setStore(localStore);
