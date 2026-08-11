@@ -17,6 +17,9 @@ export type Member = {
   lastLoginAt?: string;
   lastCreditDeductedOn?: string;
   suspendedAt?: string;
+  suspensionReason?: string;
+  suspensionUntil?: string;
+  forcePasswordChange?: boolean;
   passwordHash: string;
   passwordSalt: string;
   createdAt: string;
@@ -36,6 +39,9 @@ type MemberRow = {
   last_login_at: string | null;
   last_credit_deducted_on: string | null;
   suspended_at: string | null;
+  suspension_reason?: string | null;
+  suspension_until?: string | null;
+  force_password_change?: boolean | null;
   password_hash: string;
   password_salt: string;
   created_at: string;
@@ -59,12 +65,12 @@ const elapsedDays = (from: string, to: string) => Math.max(0, Math.floor((dateKe
 const fromRow = (row: MemberRow): Member => ({
   id: row.id, name: row.name, username: row.username, role: row.role, credits: row.credits, status: row.status,
   lastLoginAt: row.last_login_at || undefined, lastCreditDeductedOn: row.last_credit_deducted_on || undefined,
-  suspendedAt: row.suspended_at || undefined, passwordHash: row.password_hash, passwordSalt: row.password_salt, createdAt: row.created_at,
+  suspendedAt: row.suspended_at || undefined, suspensionReason: row.suspension_reason || undefined, suspensionUntil: row.suspension_until || undefined, forcePasswordChange: Boolean(row.force_password_change), passwordHash: row.password_hash, passwordSalt: row.password_salt, createdAt: row.created_at,
 });
 const toRow = (member: Member): MemberRow => ({
   id: member.id, name: member.name, username: member.username, role: member.role, credits: member.credits, status: member.status,
   last_login_at: member.lastLoginAt || null, last_credit_deducted_on: member.lastCreditDeductedOn || null,
-  suspended_at: member.suspendedAt || null, password_hash: member.passwordHash, password_salt: member.passwordSalt, created_at: member.createdAt,
+  suspended_at: member.suspendedAt || null, suspension_reason: member.suspensionReason || null, suspension_until: member.suspensionUntil || null, force_password_change: Boolean(member.forcePasswordChange), password_hash: member.passwordHash, password_salt: member.passwordSalt, created_at: member.createdAt,
 });
 
 async function readSupabaseMembers() {
@@ -87,6 +93,9 @@ async function updateSupabaseMember(id: string, changes: Partial<Member>) {
   if (changes.lastLoginAt !== undefined) row.last_login_at = changes.lastLoginAt || null;
   if (changes.lastCreditDeductedOn !== undefined) row.last_credit_deducted_on = changes.lastCreditDeductedOn || null;
   if (changes.suspendedAt !== undefined) row.suspended_at = changes.suspendedAt || null;
+  if (changes.suspensionReason !== undefined) row.suspension_reason = changes.suspensionReason || null;
+  if (changes.suspensionUntil !== undefined) row.suspension_until = changes.suspensionUntil || null;
+  if (changes.forcePasswordChange !== undefined) row.force_password_change = changes.forcePasswordChange;
   if (changes.passwordHash !== undefined) row.password_hash = changes.passwordHash;
   if (changes.passwordSalt !== undefined) row.password_salt = changes.passwordSalt;
   const { data, error } = await supabaseAdmin().from("members").update(row).eq("id", id).select("*").maybeSingle();
@@ -301,6 +310,71 @@ export async function updateMemberCredits(id: string, credits: number) {
   }) }));
   if (!updated) throw new Error("Member not found.");
   return updated;
+}
+
+export async function updateMemberProfile(id: string, input: { name?: string; username?: string; role?: MemberRole }) {
+  const name = input.name?.trim();
+  const username = input.username === undefined ? undefined : cleanUsername(input.username);
+  if (name !== undefined && (name.length < 2 || name.length > 80)) throw new Error("Name must be between 2 and 80 characters.");
+  if (username !== undefined && !/^[a-z0-9._-]{3,40}$/.test(username)) throw new Error("Username must be 3-40 characters using letters, numbers, ., _, or -.");
+  if (input.role !== undefined && input.role !== "user" && input.role !== "admin") throw new Error("Invalid role.");
+  const changes = { ...(name === undefined ? {} : { name }), ...(username === undefined ? {} : { username }), ...(input.role === undefined ? {} : { role: input.role }) };
+  if (isSupabaseConfigured()) {
+    const existing = (await readSupabaseMembers()).find((member) => member.id === id);
+    if (!existing) throw new Error("Member not found.");
+    return publicMember(await updateSupabaseMember(id, changes) || existing);
+  }
+  let updated: PublicMember | null = null;
+  await updateMembers((file) => {
+    if (username && file.members.some((member) => member.id !== id && member.username === username)) throw new Error("That username is already in use.");
+    return { members: file.members.map((member) => member.id === id ? ({ ...member, ...changes, username: username || member.username }) : member) };
+  });
+  const member = (await readMembers()).members.find((item) => item.id === id);
+  if (!member) throw new Error("Member not found.");
+  updated = publicMember(member);
+  return updated;
+}
+
+export async function resetMemberPassword(id: string, password: string) {
+  if (password.length < 8) throw new Error("Temporary password must be at least 8 characters.");
+  const credentials = await hashPassword(password);
+  if (isSupabaseConfigured()) {
+    const existing = (await readSupabaseMembers()).find((member) => member.id === id);
+    if (!existing) throw new Error("Member not found.");
+    return publicMember(await updateSupabaseMember(id, { ...credentials, forcePasswordChange: true }) || existing);
+  }
+  await updateMembers((file) => ({ members: file.members.map((member) => member.id === id ? { ...member, ...credentials, forcePasswordChange: true } : member) }));
+  const member = (await readMembers()).members.find((item) => item.id === id);
+  if (!member) throw new Error("Member not found.");
+  return publicMember(member);
+}
+
+export async function suspendMember(id: string, reason: string, until?: string) {
+  const cleanReason = reason.trim();
+  if (!cleanReason) throw new Error("A suspension reason is required.");
+  const changes = { status: "suspended" as const, suspendedAt: new Date().toISOString(), suspensionReason: cleanReason.slice(0, 240), suspensionUntil: until || undefined };
+  if (isSupabaseConfigured()) {
+    const existing = (await readSupabaseMembers()).find((member) => member.id === id);
+    if (!existing) throw new Error("Member not found.");
+    return publicMember(await updateSupabaseMember(id, changes) || existing);
+  }
+  await updateMembers((file) => ({ members: file.members.map((member) => member.id === id ? { ...member, ...changes } : member) }));
+  const member = (await readMembers()).members.find((item) => item.id === id);
+  if (!member) throw new Error("Member not found.");
+  return publicMember(member);
+}
+
+export async function bulkAdjustCredits(amount: number) {
+  if (!Number.isInteger(amount) || amount === 0) throw new Error("Credit adjustment must be a non-zero whole number.");
+  const apply = (member: Member) => member.role === "user" && member.status === "active" ? { ...member, credits: Math.max(0, Math.min(1_000_000, member.credits + amount)), lastCreditDeductedOn: istDateKey() } : member;
+  if (isSupabaseConfigured()) {
+    const members = await readSupabaseMembers();
+    const targets = members.filter((member) => member.role === "user" && member.status === "active");
+    await Promise.all(targets.map((member) => updateSupabaseMember(member.id, apply(member))));
+    return targets.length;
+  }
+  await updateMembers((file) => ({ members: file.members.map(apply) }));
+  return (await readMembers()).members.filter((member) => member.role === "user" && member.status === "active").length;
 }
 
 export async function recordSuccessfulLogin(id: string) {

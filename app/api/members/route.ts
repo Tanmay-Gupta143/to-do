@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { requestSession } from "../../../lib/auth";
-import { createMember, deleteMember, findMember, listMembers, restoreMember, updateMemberCredits } from "../../../lib/members";
+import { bulkAdjustCredits, createMember, deleteMember, findMember, listMembers, resetMemberPassword, restoreMember, suspendMember, updateMemberCredits, updateMemberProfile } from "../../../lib/members";
 
 const adminSession = async (request: Request) => {
   const session = requestSession(request);
@@ -32,10 +32,14 @@ export async function POST(request: Request) {
 export async function PATCH(request: Request) {
   if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
   if (!await adminSession(request)) return NextResponse.json({ error: "Admin access required." }, { status: 403 });
-  const body = await request.json().catch(() => ({})) as { id?: string; credits?: number; action?: string };
-  if (!body.id) return errorResponse(new Error("Member id is required."));
+  const body = await request.json().catch(() => ({})) as { id?: string; credits?: number; action?: string; name?: string; username?: string; role?: "user" | "admin"; password?: string; reason?: string; until?: string; amount?: number };
   try {
+    if (body.action === "bulk-credits") return NextResponse.json({ affected: await bulkAdjustCredits(Number(body.amount)) });
+    if (!body.id) return errorResponse(new Error("Member id is required."));
     if (body.action === "restore") return NextResponse.json({ member: await restoreMember(body.id) });
+    if (body.action === "suspend") return NextResponse.json({ member: await suspendMember(body.id, body.reason || "", body.until) });
+    if (body.action === "reset-password") return NextResponse.json({ member: await resetMemberPassword(body.id, body.password || "") });
+    if (body.action === "update-profile") return NextResponse.json({ member: await updateMemberProfile(body.id, { name: body.name, username: body.username, role: body.role }) });
     return NextResponse.json({ member: await updateMemberCredits(body.id, Number(body.credits)) });
   }
   catch (error) { return errorResponse(error); }
