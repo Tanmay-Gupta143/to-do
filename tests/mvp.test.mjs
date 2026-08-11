@@ -185,3 +185,19 @@ test("user settings show the authenticated member credit balance", async () => {
 test("the garbled top-bar date chip is hidden", () => {
   assert.match(css, /\.date-chip\s*\{[\s\S]*display: none/);
 });
+
+test("study data is durable per authenticated member and admin rhythm is derived server-side", async () => {
+  const studyRoute = await readFile(new URL("../app/api/study-data/route.ts", import.meta.url), "utf8");
+  const memberRoute = await readFile(new URL("../app/api/members/route.ts", import.meta.url), "utf8");
+  const studyData = await readFile(new URL("../lib/study-data.ts", import.meta.url), "utf8");
+  assert.match(studyRoute, /requestSession\(request\)/);
+  assert.match(studyRoute, /findMember\(session\.username\)/);
+  assert.match(studyRoute, /from\("study_data"\)/);
+  assert.match(studyRoute, /mergeStores/);
+  assert.match(memberRoute, /rhythmFromStore/);
+  assert.match(memberRoute, /select\("member_id,data"\)/);
+  assert.match(studyData, /export function rhythmFromStore/);
+  assert.match(page, /syncReady/);
+  assert.match(page, /api\/study-data/);
+  assert.match(page, /Rhythm: \{member\.rhythm/);
+});

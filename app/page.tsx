@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import quoteLibrary from "success-motivational-quotes";
 import {
   ArrowRight,
@@ -17,21 +17,13 @@ import {
   Sparkles,
   Trash2,
 } from "lucide-react";
+import { EMPTY_STORE, mergeInitialStores, mergeStores, normalizeStore, type StudyDayRecord, type StudyStore, type StudyTask } from "../lib/study-data";
 
-type Task = { id: string; title: string; completed: boolean };
-type DayRecord = {
-  date: string;
-  scheduled: boolean;
-  setupStartedAt?: number;
-  activeSeconds: number;
-  setupComplete: boolean;
-  submitted: boolean;
-  submittedAt?: number;
-  tasks: Task[];
-};
-type Store = { records: Record<string, DayRecord>; reminderTime: string; displayName: string };
+type Task = StudyTask;
+type DayRecord = StudyDayRecord;
+type Store = StudyStore;
 type AuthSession = { username: string; name: string; role: "user" | "admin"; credits: number };
-type Member = { id: string; name: string; username: string; role: "user" | "admin"; credits: number; status: "active" | "suspended" | "expired"; lastLoginAt?: string; createdAt: string; suspensionReason?: string; suspensionUntil?: string; forcePasswordChange?: boolean };
+type Member = { id: string; name: string; username: string; role: "user" | "admin"; credits: number; status: "active" | "suspended" | "expired"; lastLoginAt?: string; createdAt: string; suspensionReason?: string; suspensionUntil?: string; forcePasswordChange?: boolean; rhythm?: { days: number; todayStatus: string } };
 
 const STORAGE_KEY = "daily-study-tracker-mvp";
 const SETUP_SECONDS = 15 * 60;
@@ -39,7 +31,7 @@ const TIME_ZONE = "Asia/Kolkata";
 const CONTACT_EMAIL = "kingluther12345@gmail.com";
 const SUSPENDED_MESSAGE = `This account was suspended after 4 days of inactivity. Contact the admin at ${CONTACT_EMAIL} for more information.`;
 const EXPIRED_MESSAGE = `This account has no credits remaining. Contact the admin at ${CONTACT_EMAIL} for more information.`;
-const blankStore: Store = { records: {}, reminderTime: "20:00", displayName: "Tanmay" };
+const blankStore: Store = EMPTY_STORE;
 
 const shortName = (fullName: string) => {
   const parts = fullName.trim().split(/\s+/).filter(Boolean);
@@ -91,7 +83,7 @@ function readStore(storageKey = STORAGE_KEY, defaultDisplayName = blankStore.dis
     }));
     const storedDisplayName = typeof parsed.displayName === "string" ? parsed.displayName.trim() : "";
     const displayName = !storedDisplayName || (storedDisplayName === blankStore.displayName && defaultDisplayName !== blankStore.displayName) ? defaultDisplayName : storedDisplayName;
-    return { ...blankStore, ...parsed, displayName, records };
+    return normalizeStore({ ...parsed, displayName, records }, defaultDisplayName);
   } catch {
     return { ...blankStore, displayName: defaultDisplayName };
   }
@@ -111,6 +103,9 @@ export default function Home() {
   const [memberNotice, setMemberNotice] = useState("");
   const [memberSaving, setMemberSaving] = useState(false);
   const [hydrated, setHydrated] = useState(false);
+  const [syncReady, setSyncReady] = useState(false);
+  const syncRequest = useRef(0);
+  const syncHydrating = useRef(true);
   const [view, setView] = useState("today");
   const [newTitle, setNewTitle] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -140,8 +135,32 @@ export default function Home() {
   const storageKey = session ? `${STORAGE_KEY}:${session.username}` : STORAGE_KEY;
   useEffect(() => {
     if (authLoading) return;
-    setStore(readStore(session ? `${STORAGE_KEY}:${session.username}` : STORAGE_KEY, session?.name));
-    setHydrated(true);
+    let cancelled = false;
+    const localStore = session ? mergeStores(readStore(STORAGE_KEY, session.name), readStore(`${STORAGE_KEY}:${session.username}`, session.name), session.name) : readStore(STORAGE_KEY);
+    setSyncReady(false);
+    if (!session) { syncHydrating.current = false; setStore(localStore); setHydrated(true); return () => { cancelled = true; }; }
+    const loadDurable = async (initial = false) => {
+      try {
+        const response = await fetch("/api/study-data", { credentials: "same-origin", cache: "no-store" });
+        if (!response.ok) throw new Error(`Load failed (${response.status}).`);
+        const data = await response.json() as { store: Store | null; durable: boolean };
+        if (cancelled) return;
+        if (initial) syncHydrating.current = true;
+        const merged = initial ? mergeInitialStores(data.store, localStore, session.name) : undefined;
+        setStore((current) => initial ? merged! : mergeInitialStores(data.store, current, session.name));
+        setHydrated(true); setSyncReady(data.durable);
+        if (initial && data.durable) { const migration = await fetch("/api/study-data", { method: "PUT", headers: { "content-type": "application/json" }, credentials: "same-origin", body: JSON.stringify({ store: merged }) }); if (!migration.ok) throw new Error("Migration failed."); }
+        if (initial) syncHydrating.current = false;
+      } catch {
+        if (initial) syncHydrating.current = false;
+        if (!cancelled) { if (initial) { setStore(localStore); setHydrated(true); } setSyncReady(false); }
+      }
+    };
+    void loadDurable(true);
+    const refresh = () => { if (document.visibilityState === "visible") void loadDurable(false); };
+    const interval = window.setInterval(refresh, 15000);
+    window.addEventListener("focus", refresh); window.addEventListener("pageshow", refresh);
+    return () => { cancelled = true; window.clearInterval(interval); window.removeEventListener("focus", refresh); window.removeEventListener("pageshow", refresh); };
   }, [authLoading, session?.username]);
   useEffect(() => {
     fetch("/api/auth", { credentials: "same-origin" })
@@ -151,9 +170,18 @@ export default function Home() {
       .finally(() => setAuthLoading(false));
   }, []);
   useEffect(() => {
-    if (!hydrated) return;
+    if (!hydrated || !syncReady || syncHydrating.current) return;
+    const requestId = ++syncRequest.current;
+    const timer = window.setTimeout(() => void fetch("/api/study-data", { method: "PUT", headers: { "content-type": "application/json" }, credentials: "same-origin", body: JSON.stringify({ store }) })
+      .then((response) => response.ok ? response.json() as Promise<{ store: Store }> : Promise.reject(new Error("Could not save study data.")))
+      .then((data) => { if (requestId === syncRequest.current) setStore((current) => JSON.stringify(current) === JSON.stringify(data.store) ? current : data.store); })
+      .catch(() => undefined), 450);
+    return () => window.clearTimeout(timer);
+  }, [hydrated, syncReady, store]);
+  useEffect(() => {
+    if (!hydrated || !session) return;
     try { localStorage.setItem(storageKey, JSON.stringify(store)); } catch { /* Keep the in-memory session usable if storage is unavailable. */ }
-  }, [hydrated, storageKey, store]);
+  }, [hydrated, session, storageKey, store]);
   useEffect(() => {
     const onVisibility = () => setVisible(document.visibilityState === "visible");
     const onBlur = () => setVisible(false);
@@ -263,7 +291,7 @@ export default function Home() {
 
   const nav = [["today", "Today", <LayoutDashboard size={17} key="today-icon" />], ["calendar", "Calendar", <CalendarDays size={17} key="calendar-icon" />], ["settings", "Settings", <Settings size={17} key="settings-icon" />], ["admin", "Admin", <ShieldCheck size={17} key="admin-icon" />]] as const;
   const isAdmin = session?.role === "admin";
-  const visibleNav = isAdmin ? nav.filter(([id]) => id === "admin") : nav.filter(([id]) => id !== "admin");
+  const visibleNav = isAdmin ? nav.filter(([id]) => id === "today" || id === "admin") : nav.filter(([id]) => id !== "admin");
   const loadMembers = useCallback(async () => {
     const response = await fetch("/api/members", { credentials: "same-origin" });
     if (!response.ok) return;
@@ -333,7 +361,7 @@ export default function Home() {
   };
   const logout = async () => { await fetch("/api/auth", { method: "DELETE" }); setSession(null); setView("today"); };
   useEffect(() => {
-    if (isAdmin && view !== "admin") setView("admin");
+    if (isAdmin && view !== "admin" && view !== "today") setView("admin");
     if (!isAdmin && view === "admin") setView("today");
   }, [view, isAdmin]);
   const timerText = `${String(Math.floor(remaining / 60)).padStart(2, "0")}:${String(remaining % 60).padStart(2, "0")}`;
@@ -345,6 +373,6 @@ export default function Home() {
     {view === "today" && <div className="today-layout"><section className="main-column"><div className="hero-row"><div><span className="date-line">{formatDate(today)}</span><h2>Keep the promise you made today.</h2><p className="muted">A short, honest list. No rescheduling, no hiding.</p></div>{record?.submitted && <span className="locked-pill"><Check size={13} /> Day locked</span>}</div>{!record?.scheduled ? <div className="schedule-panel"><div className="panel-icon"><Sparkles size={19} /></div><div><h3>Start with your real list</h3><p>Schedule today&apos;s tasks to open a focused 15-minute setup window. Finish early when the list feels honest.</p></div><button className="primary-btn" onClick={startSchedule}>Schedule today&apos;s tasks <ArrowRight size={15} /></button></div> : <>{timerPanel}{!record.submitted && !setupOpen && record.tasks.length > 0 && <div className="timer-panel"><div className="timer-copy"><span className="timer-kicker">TASKS IN MOTION</span><strong>{progress}% complete</strong><span>Add honestly. Complete honestly.</span></div><button className="submit-btn" onClick={submit}>Submit today <ArrowRight size={15} /></button></div>}{record.submitted && <div className="timer-panel"><div className="timer-copy"><span className="timer-kicker">SUBMITTED</span><strong>Today is locked</strong><span>Your unchecked tasks are saved as incomplete.</span></div></div>}{setupOpen && <div className="setup-note"><span className="live-dot" /> Setup mode ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· add, edit, delete, or duplicate. Completion starts after setup.</div>}<div className="task-header"><div><span className="section-label">TODAY&apos;S TASKS</span><h3>{record.tasks.length} {record.tasks.length === 1 ? "task" : "tasks"}</h3></div><span className={`status-text ${statusFor(record)}`}>{statusLabel(statusFor(record))}</span></div><div className="task-list">{record.tasks.map((task) => <div className={`task-row ${task.completed || (record.submitted && !task.completed) ? "done" : ""}`} key={task.id}><button className="check" onClick={() => toggleTask(task.id)} aria-label={task.completed ? `Mark ${task.title} incomplete` : `Complete ${task.title}`} disabled={setupOpen || record.submitted}>{task.completed ? <Check size={13} /> : null}</button>{editingId === task.id ? <input className="edit-input" autoFocus value={editingTitle} onChange={(e) => setEditingTitle(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") saveEdit(task.id); if (e.key === "Escape") cancelEdit(); }} onBlur={() => saveEdit(task.id)} /> : <span className="task-title">{task.title}</span>}<div className="task-actions">{!record.submitted && <>{setupOpen && <button className="text-btn" onClick={() => editTask(task)} aria-label={`Edit ${task.title}`}><Pencil size={13} /></button>}<button className="text-btn" onClick={() => duplicateTask(task)} aria-label={`Duplicate ${task.title}`}><Copy size={13} /></button>{setupOpen && <button className="delete-btn" onClick={() => deleteTask(task.id)} aria-label={`Delete ${task.title}`}><Trash2 size={14} /></button>}</>}</div></div>)}{draftDuplicate && editingId === draftDuplicate.id && <div className="task-row task-row-draft"><button className="check" disabled aria-label="New duplicate task" /><input className="edit-input" autoFocus value={editingTitle} onChange={(e) => setEditingTitle(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") saveEdit(draftDuplicate.id); if (e.key === "Escape") cancelEdit(); }} onBlur={() => saveEdit(draftDuplicate.id)} /><button className="text-btn" onClick={cancelEdit} aria-label="Cancel duplicate"><Trash2 size={14} /></button></div>}{!record.tasks.length && !draftDuplicate && <div className="empty-tasks">Your list is empty. Add the tasks you genuinely intend to do.</div>}</div>{!record.submitted && <form className="add-task" onSubmit={(e) => { e.preventDefault(); addTask(newTitle); }}><Plus size={17} /><input value={newTitle} onChange={(e) => setNewTitle(e.target.value)} placeholder="Add another task..." aria-label="New task title" /><button type="submit">Add task</button></form>}</> }</section><aside className="right-rail"><div className="rail-card progress-card"><div className="card-heading"><span>Today&apos;s progress</span><span className="mini-date">{new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", timeZone: TIME_ZONE }).format(new Date(`${today}T12:00:00Z`))}</span></div><div className="progress-ring" style={{ "--progress": `${progress * 3.6}deg` } as React.CSSProperties}><div><strong>{progress}%</strong><span>complete</span></div></div><p>{record?.tasks.length ? `${record.tasks.filter((task) => task.completed).length} of ${record.tasks.length} tasks complete` : "No tasks scheduled yet"}</p></div><div className="rail-card quiet-card"><span className="card-kicker">A note for today</span><p>&quot;{motivationalQuote.body}&quot;</p><span className="note-by">- {motivationalQuote.by}</span></div><div className="rail-card streak-card"><span className="card-heading">Current rhythm</span><strong>{streak} {streak === 1 ? "day" : "days"}</strong><span>{streak ? "Keep showing up." : "Submit a day to start your streak."}</span></div></aside></div>}
     {view === "calendar" && <section className="page-panel calendar-panel"><div className="calendar-toolbar"><div><span className="section-label">MONTHLY VIEW</span><h2>{formatMonth(monthKey)}</h2></div><div><button className="round-btn" onClick={() => setMonthKey((key) => shiftMonth(key, -1))} aria-label="Previous month">&lt;</button><button className="round-btn" onClick={() => setMonthKey((key) => shiftMonth(key, 1))} aria-label="Next month">&gt;</button></div></div><div className="legend"><span><i className="legend-dot green" /> Complete</span><span><i className="legend-dot yellow" /> Partial</span><span><i className="legend-dot red" /> Missed / empty</span></div><div className="calendar-grid">{["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day) => <span className="weekday" key={day}>{day}</span>)}{calendarDays.map((day, index) => day ? <button className={`calendar-day ${day === today ? "today-day" : ""}`} key={day} onClick={() => day === today && setView("today")}><span>{Number(day.slice(-2))}</span><i className={statusFor(store.records[day])} /></button> : <span className="calendar-blank" key={`blank-${index}`} />)}</div></section>}
     {view === "settings" && <section className="page-panel settings-panel"><span className="section-label">YOUR PREFERENCES</span><h2>Make the workspace yours.</h2><div className="settings-list"><label>Display name<input value={store.displayName} onChange={(e) => setStore((current) => ({ ...current, displayName: e.target.value }))} /></label><label>Daily reminder time<input type="time" value={store.reminderTime} onChange={(e) => setStore((current) => ({ ...current, reminderTime: e.target.value }))} /><small>Reminder timing applies immediately. It nudges you only when tasks remain.</small></label><div className="settings-row"><div><strong>Credits remaining</strong><span>Credits expire at one per day.</span></div><strong className="credits-value">{session.credits}</strong></div><div className="settings-row"><div><strong>India time</strong><span>All daily records use Asia/Kolkata.</span></div><span className="toggle on">On</span></div><div className="settings-row settings-logout-row"><div><strong>Sign out</strong><span>End this session on this device.</span></div><button className="small-outline settings-logout" onClick={logout}>Sign out <LogOut size={14} /></button></div><div className="settings-row"><div><strong>Private workspace</strong><span>Your task history stays on this device in the MVP.</span></div><span className="toggle on">On</span></div></div></section>}
-    {view === "admin" && <section className="page-panel admin-panel"><div className="admin-banner"><div><span className="section-label">ADMIN MODE</span><h2>Manage members and credits.</h2><p>Create a private login for each member. Passwords are confirmed twice and stored as hashes; one credit expires per day.</p></div><div className="admin-actions"><span className="admin-badge">Full access</span><button type="button" className="small-outline" onClick={() => void bulkCredits()}>Bulk credits</button><button type="button" className="small-outline admin-signout" onClick={logout}><LogOut size={14} /> Sign out</button></div></div><form className="member-create" onSubmit={createMember}><div className="member-create-heading"><span className="section-label">ADD MEMBER</span><strong>New member access</strong></div><div className="member-form-grid"><label>Full name<input value={memberForm.name} onChange={(event) => setMemberForm((current) => ({ ...current, name: event.target.value }))} placeholder="e.g. Aditi Sharma" required /></label><label>Username<input value={memberForm.username} onChange={(event) => setMemberForm((current) => ({ ...current, username: event.target.value }))} placeholder="aditi" autoComplete="username" required /></label><label>Create password<input type="password" value={memberForm.password} onChange={(event) => setMemberForm((current) => ({ ...current, password: event.target.value }))} minLength={8} autoComplete="new-password" required /></label><label>Confirm password<input type="password" value={memberForm.confirmPassword} onChange={(event) => setMemberForm((current) => ({ ...current, confirmPassword: event.target.value }))} minLength={8} autoComplete="new-password" required /></label><label>Initial credits<input type="number" min="0" max="1000000" step="1" value={memberForm.credits} onChange={(event) => setMemberForm((current) => ({ ...current, credits: event.target.value }))} required /></label><button className="primary-btn" type="submit" disabled={memberSaving}>{memberSaving ? "Creating..." : "Create member"} <Plus size={15} /></button></div>{memberError && <p className="member-feedback error">{memberError}</p>}{memberNotice && <p className="member-feedback success">{memberNotice}</p>}</form><div className="user-table"><div className="table-head member-table-head"><span>Member</span><span>Username</span><span>Credits</span><span>Access</span></div>{members.map((member) => <div className="table-row member-row" key={member.id}><div className="student-cell"><span className="mini-avatar">{shortName(member.name)}</span><div><strong>{member.name}</strong><span>{member.role === "admin" ? "Administrator" : "Member"}</span></div></div><span>@{member.username}</span><div className="credit-edit"><input aria-label={`Credits for ${member.name}`} type="number" min="0" max="1000000" defaultValue={member.credits} key={`${member.id}-${member.credits}`} /><button className="small-outline" onClick={(event) => { const input = event.currentTarget.previousElementSibling as HTMLInputElement; void saveCredits(member, input.value); }}>Save</button></div><div className="member-actions"><span className={`member-access member-status-${member.status}`}>{member.role === "admin" ? "Admin" : member.status === "active" ? "Login enabled" : member.status === "suspended" ? "Suspended" : "Credits expired"}</span><small>Last login: {member.lastLoginAt ? new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: TIME_ZONE }).format(new Date(member.lastLoginAt)) : "Never"}</small>{member.suspensionReason && <small>Reason: {member.suspensionReason}</small>}<button type="button" className="small-outline" onClick={() => void editMember(member)}>Edit</button><button type="button" className="small-outline" onClick={() => void resetPassword(member)}>Reset password</button>{member.status === "active" && member.username !== session.username && <button type="button" className="small-outline danger-outline" onClick={() => void suspend(member)}>Suspend</button>}{member.status !== "active" && member.username !== session.username && <button type="button" className="small-outline" onClick={() => void restoreMember(member)}>Restore</button>}{member.username !== session.username && <button type="button" className="small-outline danger-outline" onClick={() => void removeMember(member)}>Delete</button>}</div></div>)}</div></section>}
+    {view === "admin" && <section className="page-panel admin-panel"><div className="admin-banner"><div><span className="section-label">ADMIN MODE</span><h2>Manage members and credits.</h2><p>Create a private login for each member. Passwords are confirmed twice and stored as hashes; one credit expires per day.</p></div><div className="admin-actions"><span className="admin-badge">Full access</span><button type="button" className="small-outline" onClick={() => void bulkCredits()}>Bulk credits</button><button type="button" className="small-outline admin-signout" onClick={logout}><LogOut size={14} /> Sign out</button></div></div><form className="member-create" onSubmit={createMember}><div className="member-create-heading"><span className="section-label">ADD MEMBER</span><strong>New member access</strong></div><div className="member-form-grid"><label>Full name<input value={memberForm.name} onChange={(event) => setMemberForm((current) => ({ ...current, name: event.target.value }))} placeholder="e.g. Aditi Sharma" required /></label><label>Username<input value={memberForm.username} onChange={(event) => setMemberForm((current) => ({ ...current, username: event.target.value }))} placeholder="aditi" autoComplete="username" required /></label><label>Create password<input type="password" value={memberForm.password} onChange={(event) => setMemberForm((current) => ({ ...current, password: event.target.value }))} minLength={8} autoComplete="new-password" required /></label><label>Confirm password<input type="password" value={memberForm.confirmPassword} onChange={(event) => setMemberForm((current) => ({ ...current, confirmPassword: event.target.value }))} minLength={8} autoComplete="new-password" required /></label><label>Initial credits<input type="number" min="0" max="1000000" step="1" value={memberForm.credits} onChange={(event) => setMemberForm((current) => ({ ...current, credits: event.target.value }))} required /></label><button className="primary-btn" type="submit" disabled={memberSaving}>{memberSaving ? "Creating..." : "Create member"} <Plus size={15} /></button></div>{memberError && <p className="member-feedback error">{memberError}</p>}{memberNotice && <p className="member-feedback success">{memberNotice}</p>}</form><div className="user-table"><div className="table-head member-table-head"><span>Member</span><span>Username</span><span>Credits</span><span>Rhythm & access</span></div>{members.map((member) => <div className="table-row member-row" key={member.id}><div className="student-cell"><span className="mini-avatar">{shortName(member.name)}</span><div><strong>{member.name}</strong><span>{member.role === "admin" ? "Administrator" : "Member"}</span></div></div><span>@{member.username}</span><div className="credit-edit"><input aria-label={`Credits for ${member.name}`} type="number" min="0" max="1000000" defaultValue={member.credits} key={`${member.id}-${member.credits}`} /><button className="small-outline" onClick={(event) => { const input = event.currentTarget.previousElementSibling as HTMLInputElement; void saveCredits(member, input.value); }}>Save</button></div><div className="member-actions"><span className={`member-access member-status-${member.status}`}>{member.role === "admin" ? "Admin" : member.status === "active" ? "Login enabled" : member.status === "suspended" ? "Suspended" : "Credits expired"}</span><small>Rhythm: {member.rhythm?.days || 0} {member.rhythm?.days === 1 ? "day" : "days"} · {member.rhythm?.todayStatus || "Not scheduled"}</small><small>Last login: {member.lastLoginAt ? new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: TIME_ZONE }).format(new Date(member.lastLoginAt)) : "Never"}</small>{member.suspensionReason && <small>Reason: {member.suspensionReason}</small>}<button type="button" className="small-outline" onClick={() => void editMember(member)}>Edit</button><button type="button" className="small-outline" onClick={() => void resetPassword(member)}>Reset password</button>{member.status === "active" && member.username !== session.username && <button type="button" className="small-outline danger-outline" onClick={() => void suspend(member)}>Suspend</button>}{member.status !== "active" && member.username !== session.username && <button type="button" className="small-outline" onClick={() => void restoreMember(member)}>Restore</button>}{member.username !== session.username && <button type="button" className="small-outline danger-outline" onClick={() => void removeMember(member)}>Delete</button>}</div></div>)}</div></section>}
     <footer className="footer"><span>Built for honest daily practice</span><span>Asia/Kolkata ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· Local MVP</span></footer></section></main>;
 }
