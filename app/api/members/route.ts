@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { requestSession } from "../../../lib/auth";
+import { requestSession, sessionMatchesMember } from "../../../lib/auth";
 import { bulkAdjustCredits, createMember, deleteMember, findMember, listMembers, resetMemberPassword, restoreMember, suspendMember, updateMemberCredits, updateMemberProfile } from "../../../lib/members";
 import { isSupabaseConfigured, supabaseAdmin } from "../../../lib/supabase-admin";
 import { rhythmFromStore } from "../../../lib/study-data";
@@ -9,7 +9,7 @@ const adminSession = async (request: Request) => {
   const session = requestSession(request);
   if (!session) return null;
   const member = await findMember(session.username);
-  return member && member.role === "admin" && member.status === "active" ? member : null;
+  return member && sessionMatchesMember(session, member) && member.role === "admin" && member.status === "active" && !member.forcePasswordChange ? member : null;
 };
 const errorResponse = (error: unknown) => NextResponse.json({ error: error instanceof Error ? error.message : "Request failed." }, { status: 400 });
 const sameOrigin = (request: Request) => {
@@ -24,7 +24,7 @@ export async function GET(request: Request) {
   const { data, error } = await supabaseAdmin().from("study_data").select("member_id,data");
   if (error) return errorResponse(error);
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
-  const rhythms = new Map((data || []).map((row) => [row.member_id as string, rhythmFromStore(row.data, today)]));
+  const rhythms = new Map((data || []).map((row: { member_id: string; data: unknown }) => [row.member_id, rhythmFromStore(row.data, today)]));
   return NextResponse.json({ members: members.map((member) => ({ ...member, rhythm: rhythms.get(member.id) || { days: 0, todayStatus: "Not scheduled" } })) });
 }
 

@@ -28,11 +28,8 @@ export function normalizeStore(value: unknown, fallbackName = EMPTY_STORE.displa
 }
 
 function mergeRecord(left: StudyDayRecord | undefined, right: StudyDayRecord | undefined, date: string): StudyDayRecord {
-  const first = left || { date, scheduled: false, activeSeconds: 0, setupComplete: false, submitted: false, tasks: [] };
-  const second = right || first;
-  const tasks = new Map<string, StudyTask>();
-  for (const task of [...first.tasks, ...second.tasks]) { const existing = tasks.get(task.id); tasks.set(task.id, existing ? { ...existing, title: task.title || existing.title, completed: existing.completed || task.completed } : task); }
-  return { date, scheduled: first.scheduled || second.scheduled, activeSeconds: Math.max(first.activeSeconds, second.activeSeconds), setupComplete: first.setupComplete || second.setupComplete, submitted: first.submitted || second.submitted, ...(first.setupStartedAt || second.setupStartedAt ? { setupStartedAt: Math.max(first.setupStartedAt || 0, second.setupStartedAt || 0) } : {}), ...(first.submittedAt || second.submittedAt ? { submittedAt: Math.max(first.submittedAt || 0, second.submittedAt || 0) } : {}), tasks: [...tasks.values()] };
+  if (left?.submitted) return left;
+  return right || left || { date, scheduled: false, activeSeconds: 0, setupComplete: false, submitted: false, tasks: [] };
 }
 
 export function mergeStores(serverValue: unknown, clientValue: unknown, fallbackName = EMPTY_STORE.displayName): StudyStore {
@@ -43,7 +40,64 @@ export function mergeStores(serverValue: unknown, clientValue: unknown, fallback
 
 export function mergeInitialStores(serverValue: unknown, clientValue: unknown, fallbackName = EMPTY_STORE.displayName): StudyStore {
   const server = normalizeStore(serverValue, fallbackName); const client = normalizeStore(clientValue, fallbackName);
-  return { records: { ...client.records, ...server.records }, reminderTime: serverValue ? server.reminderTime : client.reminderTime, displayName: serverValue ? server.displayName : client.displayName || fallbackName };
+  return { records: Object.fromEntries(Object.entries({ ...client.records, ...server.records }).map(([date, record]) => [date, { ...record, setupStartedAt: undefined }])), reminderTime: serverValue ? server.reminderTime : client.reminderTime, displayName: serverValue ? server.displayName : client.displayName || fallbackName };
+}
+
+/** Running setup belongs to the visible tab. Only elapsed checkpoints are durable. */
+export function durableStore(value: unknown, fallbackName = EMPTY_STORE.displayName): StudyStore {
+  const store = normalizeStore(value, fallbackName);
+  return { ...store, records: Object.fromEntries(Object.entries(store.records).map(([date, record]) => [date, { ...record, setupStartedAt: undefined }])) };
+}
+
+/** Rebase unsaved local edits after a conditional save finds a newer server copy. */
+export function mergeConcurrentStores(baseValue: unknown, localValue: unknown, remoteValue: unknown, fallbackName = EMPTY_STORE.displayName): StudyStore {
+  const base = durableStore(baseValue, fallbackName);
+  const local = durableStore(localValue, fallbackName);
+  const remote = durableStore(remoteValue, fallbackName);
+  const changed = (a: unknown, b: unknown) => JSON.stringify(a) !== JSON.stringify(b);
+  const choose = <T>(oldValue: T, localValue: T, remoteValue: T) => changed(localValue, oldValue) ? localValue : remoteValue;
+  const records: Record<string, StudyDayRecord> = {};
+  for (const date of new Set([...Object.keys(base.records), ...Object.keys(local.records), ...Object.keys(remote.records)])) {
+    const oldDay = base.records[date];
+    const localDay = local.records[date];
+    const remoteDay = remote.records[date];
+    if (remoteDay?.submitted) { records[date] = remoteDay; continue; }
+    if (!changed(localDay, oldDay)) { if (remoteDay) records[date] = remoteDay; continue; }
+    if (!changed(remoteDay, oldDay)) { if (localDay) records[date] = localDay; continue; }
+    if (!localDay) continue;
+    if (!remoteDay) { records[date] = localDay; continue; }
+    const oldTasks = new Map(oldDay?.tasks.map((task) => [task.id, task]) || []);
+    const localTasks = new Map(localDay.tasks.map((task) => [task.id, task]));
+    const remoteTasks = new Map(remoteDay.tasks.map((task) => [task.id, task]));
+    const tasks: StudyTask[] = [];
+    for (const id of new Set([...localTasks.keys(), ...remoteTasks.keys()])) {
+      const oldTask = oldTasks.get(id);
+      const localTask = localTasks.get(id);
+      const remoteTask = remoteTasks.get(id);
+      // A deletion of an existing task wins over a simultaneous edit.
+      if (oldTask && (!localTask || !remoteTask)) continue;
+      if (!localTask || !remoteTask) { const task = localTask || remoteTask; if (task) tasks.push(task); continue; }
+      tasks.push(oldTask ? {
+        id,
+        title: choose(oldTask.title, localTask.title, remoteTask.title),
+        completed: choose(oldTask.completed, localTask.completed, remoteTask.completed),
+      } : localTask);
+    }
+    records[date] = {
+      date,
+      scheduled: choose(oldDay?.scheduled ?? false, localDay.scheduled, remoteDay.scheduled),
+      activeSeconds: Math.max(localDay.activeSeconds, remoteDay.activeSeconds),
+      setupComplete: choose(oldDay?.setupComplete ?? false, localDay.setupComplete, remoteDay.setupComplete),
+      submitted: choose(oldDay?.submitted ?? false, localDay.submitted, remoteDay.submitted),
+      ...(choose(oldDay?.submittedAt, localDay.submittedAt, remoteDay.submittedAt) !== undefined ? { submittedAt: choose(oldDay?.submittedAt, localDay.submittedAt, remoteDay.submittedAt) } : {}),
+      tasks,
+    };
+  }
+  return {
+    records,
+    reminderTime: choose(base.reminderTime, local.reminderTime, remote.reminderTime),
+    displayName: choose(base.displayName, local.displayName, remote.displayName),
+  };
 }
 
 export function rhythmFromStore(value: unknown, today: string) {

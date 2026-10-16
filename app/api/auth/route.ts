@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 
-import { COOKIE_NAME, requestSession, serializeSession, sessionForMember, SESSION_AGE } from "../../../lib/auth";
-import { findMember, recordSuccessfulLogin, verifyMember } from "../../../lib/members";
+import { COOKIE_NAME, requestSession, serializeSession, sessionForMember, sessionMatchesMember, SESSION_AGE } from "../../../lib/auth";
+import { changeMemberPassword, findMember, recordSuccessfulLogin, verifyMember } from "../../../lib/members";
 
 const CONTACT_EMAIL = "kingluther12345@gmail.com";
 const INVALID_CREDENTIALS_MESSAGE = `This is a private workspace. Contact the admin at ${CONTACT_EMAIL} for more information.`;
-const SUSPENDED_ACCOUNT_MESSAGE = `This account was suspended after 4 days of inactivity. Contact the admin at ${CONTACT_EMAIL} for more information.`;
+const SUSPENDED_ACCOUNT_MESSAGE = `This account is suspended. Contact the admin at ${CONTACT_EMAIL} for more information.`;
 const EXPIRED_ACCOUNT_MESSAGE = `This account has no credits remaining. Contact the admin at ${CONTACT_EMAIL} for more information.`;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_MAX_ATTEMPTS = 5;
@@ -42,7 +42,7 @@ export async function POST(request: Request) {
   if (member.status === "expired") return NextResponse.json({ code: "CREDITS_EXPIRED", error: EXPIRED_ACCOUNT_MESSAGE }, { status: 403 });
   const activeMember = await recordSuccessfulLogin(member.id);
   const session = sessionForMember(activeMember);
-  const response = NextResponse.json({ username: session.username, name: session.name, role: session.role, credits: session.credits });
+  const response = NextResponse.json({ username: session.username, name: session.name, role: session.role, credits: session.credits, forcePasswordChange: Boolean(activeMember.forcePasswordChange) });
   setSessionCookie(response, serializeSession(session));
   return response;
 }
@@ -51,12 +51,32 @@ export async function GET(request: Request) {
   const session = requestSession(request);
   if (!session) return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
   const member = await findMember(session.username);
-  if (!member || member.status !== "active") {
+  if (!member || member.status !== "active" || !sessionMatchesMember(session, member)) {
     const response = NextResponse.json({ error: "Session expired" }, { status: 401 });
     setSessionCookie(response, "", 0);
     return response;
   }
-  return NextResponse.json({ username: member.username, name: member.name, role: member.role, credits: member.credits });
+  return NextResponse.json({ username: member.username, name: member.name, role: member.role, credits: member.credits, forcePasswordChange: Boolean(member.forcePasswordChange) });
+}
+
+export async function PATCH(request: Request) {
+  if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
+  const session = requestSession(request);
+  if (!session) return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
+  const member = await findMember(session.username);
+  if (!member || member.status !== "active" || !sessionMatchesMember(session, member)) return NextResponse.json({ error: "Session expired" }, { status: 401 });
+  const body = await request.json().catch(() => ({})) as { currentPassword?: string; newPassword?: string };
+  if (!body.currentPassword || !body.newPassword) return NextResponse.json({ error: "Current and new passwords are required." }, { status: 400 });
+  try {
+    const updated = await changeMemberPassword(member.id, body.currentPassword, body.newPassword);
+    const refreshed = await findMember(updated.username);
+    if (!refreshed) throw new Error("Session could not be refreshed.");
+    const response = NextResponse.json({ username: updated.username, name: updated.name, role: updated.role, credits: updated.credits, forcePasswordChange: false });
+    setSessionCookie(response, serializeSession(sessionForMember(refreshed)));
+    return response;
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Password could not be changed." }, { status: 400 });
+  }
 }
 
 export async function DELETE() {

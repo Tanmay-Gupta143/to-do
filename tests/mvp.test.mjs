@@ -5,24 +5,25 @@ import test from "node:test";
 const root = new URL("../", import.meta.url);
 const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
 const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+const liveBase = process.env.LIVE_TEST_URL;
 
-test("the live MVP responds successfully", async () => {
-  const response = await fetch("http://localhost:5173/");
+test("the live MVP responds successfully", { skip: !liveBase }, async () => {
+  const response = await fetch(`${liveBase}/`);
   assert.equal(response.status, 200);
   assert.match(await response.text(), /Daily Study/i);
 });
 
-test("the auth endpoint rejects anonymous requests and accepts the default admin credential", async () => {
-  const anonymous = await fetch("http://localhost:5173/api/auth");
+test("the auth endpoint rejects anonymous requests and accepts configured admin credentials", { skip: !liveBase || !process.env.ADMIN_USERNAME || !process.env.ADMIN_PASSWORD }, async () => {
+  const anonymous = await fetch(`${liveBase}/api/auth`);
   assert.equal(anonymous.status, 401);
-  const login = await fetch("http://localhost:5173/api/auth", {
+  const login = await fetch(`${liveBase}/api/auth`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ username: "tanmay-admin", password: "tavash123" }),
+    body: JSON.stringify({ username: process.env.ADMIN_USERNAME, password: process.env.ADMIN_PASSWORD }),
   });
   assert.equal(login.status, 200);
   const loginPayload = await login.json();
-  assert.equal(loginPayload.username, "tanmay-admin");
+  assert.equal(loginPayload.username, process.env.ADMIN_USERNAME);
   assert.equal(loginPayload.role, "admin");
   assert.equal(typeof loginPayload.name, "string");
 });
@@ -45,9 +46,8 @@ test("task permissions and duplicate editing follow the PRD", () => {
 });
 
 test("the admin navigation is role-gated and the demo label is removed", () => {
-  assert.match(page, /const visibleNav = isAdmin \? nav\.filter\(\(\[id\]\) => id === "admin"\) : nav\.filter\(\(\[id\]\) => id !== "admin"\)/);
+  assert.match(page, /const visibleNav = isAdmin \? nav\.filter\(\(\[id\]\) => id === "today" \|\| id === "admin"\) : nav\.filter\(\(\[id\]\) => id !== "admin"\)/);
   assert.doesNotMatch(page, /\["admin", "Admin demo"/);
-  assert.match(page, /if \(isAdmin && view !== "admin"\) setView\("admin"\)/);
   assert.match(page, /if \(!isAdmin && view === "admin"\) setView\("today"\)/);
   assert.match(page, /setView\(nextSession\.role === "admin" \? "admin" : "today"\)/);
   assert.doesNotMatch(page, /tanmay@example\.com/);
@@ -57,7 +57,7 @@ test("the admin navigation is role-gated and the demo label is removed", () => {
 test("authentication failures render the account-access popup", () => {
   assert.match(page, /role="alertdialog"/);
   assert.match(page, /kingluther12345@gmail\.com/);
-  assert.match(page, /This account was suspended after 4 days of inactivity/);
+  assert.match(page, /This account is suspended/);
   assert.match(page, /This account has no credits remaining/);
   assert.match(page, /setLoginError\(""\)/);
   assert.match(page, /setLoginUsername\(""\); setLoginPassword\(""\); setLoginError\(""\)/);
@@ -94,16 +94,16 @@ test("the note uses a locally bundled daily motivational quote", () => {
   assert.match(page, /motivationalQuote\.by/);
 });
 
-test("the branded orange notebook icon is served and used by the app", async () => {
-  const response = await fetch("http://localhost:5173/daily-study-icon.png");
-  assert.equal(response.status, 200);
+test("the branded orange notebook icon is bundled and used by the app", async () => {
+  const icon = await readFile(new URL("../public/daily-study-icon.png", import.meta.url));
+  assert.ok(icon.length > 0);
   assert.match(css, /background-image: url\("\/daily-study-icon\.png\?v=2"\)/);
   assert.match(await readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"), /daily-study-icon\.png/);
 });
 
 test("member identity and streak presentation are data-driven", () => {
   assert.match(page, /type AuthSession = \{ username: string; name: string;/);
-  assert.match(page, /readStore\(session \? `\$\{STORAGE_KEY\}:\$\{session\.username\}` : STORAGE_KEY, session\?\.name\)/);
+  assert.match(page, /readStore\(accountKey, session\.name\)/);
   assert.match(page, /while \(store\.records\[cursor\]\?\.submitted\)/);
   assert.doesNotMatch(page, /<strong>4 days<\/strong>/);
 });
@@ -193,7 +193,7 @@ test("study data is durable per authenticated member and admin rhythm is derived
   assert.match(studyRoute, /requestSession\(request\)/);
   assert.match(studyRoute, /findMember\(session\.username\)/);
   assert.match(studyRoute, /from\("study_data"\)/);
-  assert.match(studyRoute, /mergeStores/);
+  assert.match(studyRoute, /\.eq\("updated_at", current\.revision\)/);
   assert.match(memberRoute, /rhythmFromStore/);
   assert.match(memberRoute, /select\("member_id,data"\)/);
   assert.match(studyData, /export function rhythmFromStore/);

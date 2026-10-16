@@ -1055,6 +1055,35 @@ h3 {
   text-align: left;
 }
 
+.calendar-day:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.reminder-banner,
+.sync-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin: 16px 0;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--secondary);
+  color: var(--foreground);
+  font-size: 12px;
+}
+
+.reminder-banner button,
+.sync-banner button {
+  flex: none;
+  color: var(--primary);
+  text-decoration: underline;
+}
+
+.sync-banner { border-color: var(--red); flex-wrap: wrap; }
+
 .calendar-day i {
   width: 8px;
   height: 8px;

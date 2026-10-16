@@ -61,6 +61,14 @@ const dateKeyToUtc = (key: string) => {
   return Date.UTC(year, month - 1, day);
 };
 const elapsedDays = (from: string, to: string) => Math.max(0, Math.floor((dateKeyToUtc(to) - dateKeyToUtc(from)) / 86_400_000));
+const validDateKey = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && new Date(dateKeyToUtc(value)).toISOString().slice(0, 10) === value;
+const creditStatus = (member: Member, credits: number): Member["status"] =>
+  member.role === "admin" || member.status === "suspended" ? member.status : credits > 0 ? "active" : "expired";
+const resumeEndedSuspension = (member: Member, today: string): Member => {
+  if (member.status !== "suspended" || !member.suspensionUntil || today <= member.suspensionUntil) return member;
+  return { ...member, status: member.credits > 0 ? "active" : "expired", lastLoginAt: new Date().toISOString(),
+    lastCreditDeductedOn: today, suspendedAt: undefined, suspensionReason: undefined, suspensionUntil: undefined };
+};
 
 const fromRow = (row: MemberRow): Member => ({
   id: row.id, name: row.name, username: row.username, role: row.role, credits: row.credits, status: row.status,
@@ -118,7 +126,7 @@ export async function passwordMatches(password: string, member: Member) {
 async function seededMember(name: string, username: string, password: string, role: MemberRole): Promise<Member> {
   return {
     id: makeId(), name, username: cleanUsername(username), role, credits: 0,
-    status: "active",
+    status: role === "admin" ? "active" : "expired",
     ...(await hashPassword(password)), createdAt: new Date().toISOString(),
   };
 }
@@ -146,17 +154,8 @@ async function readMembers(): Promise<MemberFile> {
     const parsed = JSON.parse(await readFile(dataFile(), "utf8")) as MemberFile;
     if (!Array.isArray(parsed.members)) throw new Error("Invalid member store");
     cached = parsed;
-    const configuredAdminUsername = process.env.ADMIN_USERNAME ? cleanUsername(process.env.ADMIN_USERNAME) : null;
-    const configuredAdminPassword = process.env.ADMIN_PASSWORD || null;
-    const legacyAdmin = cached.members.find((member) => member.role === "admin" && member.username === "admin");
-    if (legacyAdmin && configuredAdminUsername && configuredAdminPassword && configuredAdminUsername !== "admin") {
-      const credentials = await hashPassword(configuredAdminPassword);
-      legacyAdmin.username = configuredAdminUsername;
-      legacyAdmin.passwordHash = credentials.passwordHash;
-      legacyAdmin.passwordSalt = credentials.passwordSalt;
-      await persistMembers(cached);
-    }
-  } catch {
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     cached = await seedMembers();
     await persistMembers(cached);
   }
@@ -168,12 +167,18 @@ async function persistMembers(file: MemberFile) {
   await mkdir(path.dirname(target), { recursive: true });
   const temporary = `${target}.${process.pid}.tmp`;
   await writeFile(temporary, JSON.stringify(file, null, 2), "utf8");
-  await rename(temporary, target);
+  for (let attempt = 0; ; attempt += 1) {
+    try { await rename(temporary, target); break; }
+    catch (error) {
+      if (attempt >= 2 || !["EPERM", "EACCES"].includes((error as NodeJS.ErrnoException).code || "")) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 25 * (attempt + 1)));
+    }
+  }
 }
 
-async function updateMembers(mutator: (file: MemberFile) => MemberFile) {
+async function updateMembers(mutator: (file: MemberFile) => MemberFile | Promise<MemberFile>) {
   const task = writeQueue.then(async () => {
-    const next = mutator(await readMembers());
+    const next = await mutator(await readMembers());
     cached = next;
     await persistMembers(next);
     return next;
@@ -195,28 +200,6 @@ export async function findMember(username: string) {
 }
 
 export async function verifyMember(username: string, password: string) {
-  const configuredAdminUsername = process.env.ADMIN_USERNAME ? cleanUsername(process.env.ADMIN_USERNAME) : null;
-  const configuredAdminPassword = process.env.ADMIN_PASSWORD || null;
-  if (configuredAdminUsername && configuredAdminPassword && cleanUsername(username) === configuredAdminUsername && password === configuredAdminPassword) {
-    if (isSupabaseConfigured()) {
-      const admin = (await readSupabaseMembers()).find((member) => member.role === "admin");
-      if (admin) {
-        const credentials = await hashPassword(configuredAdminPassword);
-        return await updateSupabaseMember(admin.id, { username: configuredAdminUsername, ...credentials }) || admin;
-      }
-      return null;
-    }
-    const file = await readMembers();
-    const admin = file.members.find((member) => member.role === "admin");
-    if (admin) {
-      admin.username = configuredAdminUsername;
-      const credentials = await hashPassword(configuredAdminPassword);
-      admin.passwordHash = credentials.passwordHash;
-      admin.passwordSalt = credentials.passwordSalt;
-      void persistMembers(file).catch(() => undefined);
-      return admin;
-    }
-  }
   const member = await findMember(username);
   return member && await passwordMatches(password, member) ? member : null;
 }
@@ -227,7 +210,7 @@ async function reconcileMembers() {
     const members = await readSupabaseMembers();
     for (const member of members) {
       if (member.role === "admin") continue;
-      const next = { ...member };
+      const next = resumeEndedSuspension({ ...member }, today);
       const lastDeductedOn = next.lastCreditDeductedOn || istDateKey(new Date(next.createdAt));
       const daysSinceDeduction = elapsedDays(lastDeductedOn, today);
       if (next.status === "active" && daysSinceDeduction > 0) {
@@ -235,13 +218,15 @@ async function reconcileMembers() {
         next.lastCreditDeductedOn = today;
         if (next.credits === 0) next.status = "expired";
       }
+      if (next.status === "active" && next.credits === 0) next.status = "expired";
       const lastSeen = new Date(next.lastLoginAt || next.createdAt).getTime();
       if (next.status === "active" && Date.now() - lastSeen >= INACTIVITY_MS) {
         next.status = "suspended";
         next.suspendedAt = new Date().toISOString();
       }
       if (next.credits !== member.credits || next.status !== member.status || next.lastCreditDeductedOn !== member.lastCreditDeductedOn || next.suspendedAt !== member.suspendedAt) {
-        await updateSupabaseMember(member.id, { credits: next.credits, status: next.status, lastCreditDeductedOn: next.lastCreditDeductedOn, suspendedAt: next.suspendedAt });
+        await updateSupabaseMember(member.id, { credits: next.credits, status: next.status, lastLoginAt: next.lastLoginAt,
+          lastCreditDeductedOn: next.lastCreditDeductedOn, suspendedAt: next.suspendedAt || "", suspensionReason: next.suspensionReason || "", suspensionUntil: next.suspensionUntil || "" });
       }
     }
     return;
@@ -250,7 +235,8 @@ async function reconcileMembers() {
     let changed = false;
     const members = file.members.map((member) => {
       if (member.role === "admin") return member;
-      const next = { ...member };
+      const next = resumeEndedSuspension({ ...member }, today);
+      if (next.status !== member.status) changed = true;
       const lastDeductedOn = next.lastCreditDeductedOn || istDateKey(new Date(next.createdAt));
       const daysSinceDeduction = elapsedDays(lastDeductedOn, today);
       if (next.status === "active" && daysSinceDeduction > 0) {
@@ -259,6 +245,7 @@ async function reconcileMembers() {
         if (next.credits === 0) next.status = "expired";
         changed = true;
       }
+      if (next.status === "active" && next.credits === 0) { next.status = "expired"; changed = true; }
       const lastSeen = new Date(next.lastLoginAt || next.createdAt).getTime();
       if (next.status === "active" && Date.now() - lastSeen >= INACTIVITY_MS) {
         next.status = "suspended";
@@ -299,12 +286,12 @@ export async function updateMemberCredits(id: string, credits: number) {
   if (isSupabaseConfigured()) {
     const existing = (await readSupabaseMembers()).find((member) => member.id === id);
     if (!existing) throw new Error("Member not found.");
-    return publicMember(await updateSupabaseMember(id, { credits, status: existing.role === "admin" ? existing.status : credits > 0 ? "active" : "expired", lastCreditDeductedOn: istDateKey() }) || existing);
+    return publicMember(await updateSupabaseMember(id, { credits, status: creditStatus(existing, credits), lastCreditDeductedOn: istDateKey() }) || existing);
   }
   let updated: PublicMember | null = null;
   await updateMembers((file) => ({ members: file.members.map((member) => {
     if (member.id !== id) return member;
-    const status = member.role === "admin" ? member.status : credits > 0 ? "active" : "expired";
+    const status = creditStatus(member, credits);
     updated = publicMember({ ...member, credits, status, lastCreditDeductedOn: istDateKey() });
     return { ...member, credits, status, lastCreditDeductedOn: istDateKey() };
   }) }));
@@ -320,13 +307,16 @@ export async function updateMemberProfile(id: string, input: { name?: string; us
   if (input.role !== undefined && input.role !== "user" && input.role !== "admin") throw new Error("Invalid role.");
   const changes = { ...(name === undefined ? {} : { name }), ...(username === undefined ? {} : { username }), ...(input.role === undefined ? {} : { role: input.role }) };
   if (isSupabaseConfigured()) {
-    const existing = (await readSupabaseMembers()).find((member) => member.id === id);
+    const members = await readSupabaseMembers();
+    const existing = members.find((member) => member.id === id);
     if (!existing) throw new Error("Member not found.");
+    if (existing.role === "admin" && input.role === "user" && !members.some((member) => member.id !== id && member.role === "admin")) throw new Error("At least one admin account is required.");
     return publicMember(await updateSupabaseMember(id, changes) || existing);
   }
   let updated: PublicMember | null = null;
   await updateMembers((file) => {
     if (username && file.members.some((member) => member.id !== id && member.username === username)) throw new Error("That username is already in use.");
+    if (input.role === "user" && file.members.some((member) => member.id === id && member.role === "admin") && !file.members.some((member) => member.id !== id && member.role === "admin")) throw new Error("At least one admin account is required.");
     return { members: file.members.map((member) => member.id === id ? ({ ...member, ...changes, username: username || member.username }) : member) };
   });
   const member = (await readMembers()).members.find((item) => item.id === id);
@@ -349,10 +339,36 @@ export async function resetMemberPassword(id: string, password: string) {
   return publicMember(member);
 }
 
+export async function changeMemberPassword(id: string, currentPassword: string, newPassword: string) {
+  if (newPassword.length < 8) throw new Error("New password must be at least 8 characters.");
+  if (currentPassword === newPassword) throw new Error("Choose a different password.");
+  if (isSupabaseConfigured()) {
+    const member = (await readSupabaseMembers()).find((item) => item.id === id);
+    if (!member) throw new Error("Member not found.");
+    if (!await passwordMatches(currentPassword, member)) throw new Error("Current password is incorrect.");
+    const updated = await updateSupabaseMember(id, { ...(await hashPassword(newPassword)), forcePasswordChange: false });
+    if (!updated) throw new Error("Member not found.");
+    return publicMember(updated);
+  }
+  let updated: PublicMember | null = null;
+  const credentials = await hashPassword(newPassword);
+  await updateMembers(async (file) => {
+    const member = file.members.find((item) => item.id === id);
+    if (!member) throw new Error("Member not found.");
+    if (!await passwordMatches(currentPassword, member)) throw new Error("Current password is incorrect.");
+    const changed = { ...member, ...credentials, forcePasswordChange: false };
+    updated = publicMember(changed);
+    return { members: file.members.map((item) => item.id === id ? changed : item) };
+  });
+  if (!updated) throw new Error("Member not found.");
+  return updated;
+}
+
 export async function suspendMember(id: string, reason: string, until?: string) {
   const cleanReason = reason.trim();
   if (!cleanReason) throw new Error("A suspension reason is required.");
-  const changes = { status: "suspended" as const, suspendedAt: new Date().toISOString(), suspensionReason: cleanReason.slice(0, 240), suspensionUntil: until || undefined };
+  if (until && (!validDateKey(until) || until < istDateKey())) throw new Error("End date must be a valid date today or later (YYYY-MM-DD).");
+  const changes = { status: "suspended" as const, suspendedAt: new Date().toISOString(), suspensionReason: cleanReason.slice(0, 240), suspensionUntil: until || "" };
   if (isSupabaseConfigured()) {
     const existing = (await readSupabaseMembers()).find((member) => member.id === id);
     if (!existing) throw new Error("Member not found.");
@@ -366,15 +382,23 @@ export async function suspendMember(id: string, reason: string, until?: string) 
 
 export async function bulkAdjustCredits(amount: number) {
   if (!Number.isInteger(amount) || amount === 0) throw new Error("Credit adjustment must be a non-zero whole number.");
-  const apply = (member: Member) => member.role === "user" && member.status === "active" ? { ...member, credits: Math.max(0, Math.min(1_000_000, member.credits + amount)), lastCreditDeductedOn: istDateKey() } : member;
+  const apply = (member: Member) => {
+    if (member.role !== "user" || member.status !== "active") return member;
+    const credits = Math.max(0, Math.min(1_000_000, member.credits + amount));
+    return { ...member, credits, status: credits > 0 ? "active" as const : "expired" as const, lastCreditDeductedOn: istDateKey() };
+  };
   if (isSupabaseConfigured()) {
     const members = await readSupabaseMembers();
     const targets = members.filter((member) => member.role === "user" && member.status === "active");
     await Promise.all(targets.map((member) => updateSupabaseMember(member.id, apply(member))));
     return targets.length;
   }
-  await updateMembers((file) => ({ members: file.members.map(apply) }));
-  return (await readMembers()).members.filter((member) => member.role === "user" && member.status === "active").length;
+  let affected = 0;
+  await updateMembers((file) => ({ members: file.members.map((member) => {
+    if (member.role === "user" && member.status === "active") affected += 1;
+    return apply(member);
+  }) }));
+  return affected;
 }
 
 export async function recordSuccessfulLogin(id: string) {
@@ -398,13 +422,13 @@ export async function restoreMember(id: string) {
     const existing = (await readSupabaseMembers()).find((member) => member.id === id);
     if (!existing) throw new Error("Member not found.");
     const now = new Date().toISOString();
-    return publicMember(await updateSupabaseMember(id, { status: existing.credits > 0 ? "active" : "expired", lastLoginAt: now, lastCreditDeductedOn: istDateKey(), suspendedAt: "" }) || existing);
+    return publicMember(await updateSupabaseMember(id, { status: existing.credits > 0 ? "active" : "expired", lastLoginAt: now, lastCreditDeductedOn: istDateKey(), suspendedAt: "", suspensionReason: "", suspensionUntil: "" }) || existing);
   }
   let updated: PublicMember | null = null;
   await updateMembers((file) => ({ members: file.members.map((member) => {
     if (member.id !== id) return member;
     const now = new Date().toISOString();
-    const restored = { ...member, status: member.credits > 0 ? "active" as const : "expired" as const, lastLoginAt: now, lastCreditDeductedOn: istDateKey(), suspendedAt: undefined };
+    const restored = { ...member, status: member.credits > 0 ? "active" as const : "expired" as const, lastLoginAt: now, lastCreditDeductedOn: istDateKey(), suspendedAt: undefined, suspensionReason: undefined, suspensionUntil: undefined };
     updated = publicMember(restored);
     return restored;
   }) }));
@@ -414,9 +438,11 @@ export async function restoreMember(id: string) {
 
 export async function deleteMember(id: string, requesterUsername: string) {
   if (isSupabaseConfigured()) {
-    const target = (await readSupabaseMembers()).find((member) => member.id === id);
+    const members = await readSupabaseMembers();
+    const target = members.find((member) => member.id === id);
     if (!target) throw new Error("Member not found.");
     if (target.username === requesterUsername) throw new Error("You cannot delete the account you are currently using.");
+    if (target.role === "admin" && !members.some((member) => member.id !== id && member.role === "admin")) throw new Error("At least one admin account is required.");
     const { error } = await supabaseAdmin().from("members").delete().eq("id", id);
     if (error) throw error;
     return publicMember(target);
@@ -426,6 +452,7 @@ export async function deleteMember(id: string, requesterUsername: string) {
     const target = file.members.find((member) => member.id === id);
     if (!target) throw new Error("Member not found.");
     if (target.username === requesterUsername) throw new Error("You cannot delete the account you are currently using.");
+    if (target.role === "admin" && !file.members.some((member) => member.id !== id && member.role === "admin")) throw new Error("At least one admin account is required.");
     deleted = publicMember(target);
     return { members: file.members.filter((member) => member.id !== id) };
   });

@@ -2,7 +2,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 
 import type { Member } from "./members";
 
-export type Session = { username: string; name: string; role: "user" | "admin"; credits: number; expiresAt: number };
+export type Session = { username: string; name: string; role: "user" | "admin"; credits: number; credentialVersion: string; expiresAt: number };
 export const COOKIE_NAME = "daily_study_session";
 export const SESSION_AGE = 8 * 60 * 60;
 
@@ -36,5 +36,11 @@ export function requestSession(request: Request) {
 }
 
 export function sessionForMember(member: Member): Session {
-  return { username: member.username, name: member.name, role: member.role, credits: member.credits, expiresAt: Date.now() + SESSION_AGE * 1000 };
+  return { username: member.username, name: member.name, role: member.role, credits: member.credits, credentialVersion: sign(member.passwordHash), expiresAt: Date.now() + SESSION_AGE * 1000 };
+}
+
+export function sessionMatchesMember(session: Session, member: Member) {
+  const expected = sign(member.passwordHash);
+  return typeof session.credentialVersion === "string" && session.credentialVersion.length === expected.length &&
+    timingSafeEqual(Buffer.from(session.credentialVersion), Buffer.from(expected));
 }

@@ -6,11 +6,11 @@
     "node": "22.x"
   },
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "test": "node --test tests/mvp.test.mjs",
-    "typecheck": "tsc --noEmit"
+    "dev": "node ./node_modules/next/dist/bin/next dev --webpack",
+    "build": "node ./node_modules/next/dist/bin/next build --webpack",
+    "start": "node ./node_modules/next/dist/bin/next start",
+    "test": "node --experimental-strip-types --test tests/mvp.test.mjs tests/persistence.test.mjs tests/account.test.mjs",
+    "typecheck": "node ./node_modules/typescript/bin/tsc --noEmit"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.2",
