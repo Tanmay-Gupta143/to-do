@@ -17,7 +17,7 @@ import {
   Sparkles,
   Trash2,
 } from "lucide-react";
-import { EMPTY_STORE, mergeConcurrentStores, normalizeStore, type StudyDayRecord, type StudyStore, type StudyTask } from "../lib/study-data";
+import { EMPTY_STORE, mergeConcurrentStores, normalizeStore, streakFromStore, type StudyDayRecord, type StudyStore, type StudyTask } from "../lib/study-data";
 
 type Task = StudyTask;
 type DayRecord = StudyDayRecord;
@@ -53,11 +53,6 @@ const shiftMonth = (key: string, amount: number) => {
   const [year, month] = key.split("-").map(Number);
   const next = new Date(Date.UTC(year, month - 1 + amount, 1));
   return `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, "0")}`;
-};
-const previousDayKey = (key: string) => {
-  const [year, month, day] = key.split("-").map(Number);
-  const previous = new Date(Date.UTC(year, month - 1, day - 1));
-  return `${previous.getUTCFullYear()}-${String(previous.getUTCMonth() + 1).padStart(2, "0")}-${String(previous.getUTCDate()).padStart(2, "0")}`;
 };
 const statusFor = (record?: DayRecord) => {
   if (!record?.scheduled || !record.tasks.length) return "red";
@@ -136,15 +131,7 @@ export default function Home() {
   const today = todayKey();
   const record = store.records[today];
   latestStore.current = store;
-  const streak = useMemo(() => {
-    let count = 0;
-    let cursor = today;
-    while (store.records[cursor]?.submitted) {
-      count += 1;
-      cursor = previousDayKey(cursor);
-    }
-    return count;
-  }, [store.records, today]);
+  const streak = useMemo(() => streakFromStore(store, today), [store, today]);
 
   const updateToday = useCallback((fn: (current: DayRecord) => DayRecord) => setStore((current) => {
     const existing = current.records[today] || emptyRecord(today);

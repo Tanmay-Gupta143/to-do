@@ -8,6 +8,7 @@ import { durableStore, type StudyStore } from "../../../lib/study-data";
 export const runtime = "nodejs";
 const noStore = { "Cache-Control": "no-store, max-age=0" };
 const sameOrigin = (request: Request) => !request.headers.get("origin") || request.headers.get("origin") === new URL(request.url).origin;
+const istToday = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
 const authenticatedMember = async (request: Request) => {
   const session = requestSession(request);
   if (!session) return null;
@@ -57,6 +58,13 @@ export async function PUT(request: Request) {
       }
     }
     for (const record of Object.values(incoming.records)) {
+      const prior = current.store?.records[record.date];
+      if (record.date > istToday()) {
+        return NextResponse.json({ error: "Future study days are not allowed." }, { status: 400, headers: noStore });
+      }
+      if (record.submitted && !prior?.submitted && record.date !== istToday()) {
+        return NextResponse.json({ error: "Only today's study day can be submitted." }, { status: 400, headers: noStore });
+      }
       if (record.submitted && (!record.scheduled || !record.tasks.length)) {
         return NextResponse.json({ error: "A submitted day must contain scheduled tasks." }, { status: 400, headers: noStore });
       }

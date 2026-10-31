@@ -6,6 +6,17 @@ export const EMPTY_STORE: StudyStore = { records: {}, reminderTime: "20:00", dis
 
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
 const taskIdPattern = /^[a-zA-Z0-9._-]{1,120}$/;
+const isCalendarDate = (key: string) => {
+  if (!datePattern.test(key)) return false;
+  const [year, month, day] = key.split("-").map(Number);
+  const value = new Date(Date.UTC(year, month - 1, day));
+  return value.getUTCFullYear() === year && value.getUTCMonth() === month - 1 && value.getUTCDate() === day;
+};
+export const previousDayKey = (key: string) => {
+  const [year, month, day] = key.split("-").map(Number);
+  const previous = new Date(Date.UTC(year, month - 1, day - 1));
+  return `${previous.getUTCFullYear()}-${String(previous.getUTCMonth() + 1).padStart(2, "0")}-${String(previous.getUTCDate()).padStart(2, "0")}`;
+};
 const cleanTask = (value: unknown): StudyTask | null => {
   if (!value || typeof value !== "object") return null;
   const task = value as Partial<StudyTask>;
@@ -17,7 +28,7 @@ export function normalizeStore(value: unknown, fallbackName = EMPTY_STORE.displa
   const input = value && typeof value === "object" ? value as Partial<StudyStore> : {};
   const records: Record<string, StudyDayRecord> = {};
   if (input.records && typeof input.records === "object") for (const [date, raw] of Object.entries(input.records as Record<string, unknown>).slice(0, 2000)) {
-    if (!datePattern.test(date) || !raw || typeof raw !== "object") continue;
+    if (!isCalendarDate(date) || !raw || typeof raw !== "object") continue;
     const record = raw as Partial<StudyDayRecord>;
     const tasks = Array.isArray(record.tasks) ? record.tasks.map(cleanTask).filter((task): task is StudyTask => Boolean(task)).slice(0, 500) : [];
     records[date] = { date, scheduled: record.scheduled === true, activeSeconds: typeof record.activeSeconds === "number" ? Math.max(0, Math.min(900, Math.floor(record.activeSeconds))) : 0, setupComplete: record.setupComplete === true, submitted: record.submitted === true, ...(typeof record.setupStartedAt === "number" ? { setupStartedAt: Math.max(0, Math.floor(record.setupStartedAt)) } : {}), ...(typeof record.submittedAt === "number" ? { submittedAt: Math.max(0, Math.floor(record.submittedAt)) } : {}), tasks };
@@ -101,8 +112,22 @@ export function mergeConcurrentStores(baseValue: unknown, localValue: unknown, r
 }
 
 export function rhythmFromStore(value: unknown, today: string) {
-  const records = normalizeStore(value).records; let days = 0; let cursor = today;
-  while (records[cursor]?.submitted) { days += 1; const [year, month, day] = cursor.split("-").map(Number); const previous = new Date(Date.UTC(year, month - 1, day - 1)); cursor = `${previous.getUTCFullYear()}-${String(previous.getUTCMonth() + 1).padStart(2, "0")}-${String(previous.getUTCDate()).padStart(2, "0")}`; }
+  const records = normalizeStore(value).records;
   const todayRecord = records[today];
-  return { days, todayStatus: !todayRecord?.scheduled || !todayRecord.tasks.length ? "Not scheduled" : todayRecord.submitted ? "Submitted" : "In progress" };
+  return { days: streakFromRecords(records, today), todayStatus: !todayRecord?.scheduled || !todayRecord.tasks.length ? "Not scheduled" : todayRecord.submitted ? "Submitted" : "In progress" };
+}
+
+/** A streak remains visible throughout the current IST day; it breaks after a full missed day. */
+export function streakFromStore(value: unknown, today: string) {
+  return streakFromRecords(normalizeStore(value).records, today);
+}
+
+function streakFromRecords(records: Record<string, StudyDayRecord>, today: string) {
+  let days = 0;
+  let cursor = records[today]?.submitted ? today : previousDayKey(today);
+  while (records[cursor]?.submitted) {
+    days += 1;
+    cursor = previousDayKey(cursor);
+  }
+  return days;
 }

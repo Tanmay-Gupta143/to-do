@@ -104,8 +104,15 @@ test("the branded orange notebook icon is bundled and used by the app", async ()
 test("member identity and streak presentation are data-driven", () => {
   assert.match(page, /type AuthSession = \{ username: string; name: string;/);
   assert.match(page, /readStore\(accountKey, session\.name\)/);
-  assert.match(page, /while \(store\.records\[cursor\]\?\.submitted\)/);
+  assert.match(page, /streakFromStore\(store, today\)/);
   assert.doesNotMatch(page, /<strong>4 days<\/strong>/);
+});
+
+test("the study-data API prevents fabricated streak days", async () => {
+  const studyRoute = await readFile(new URL("../app/api/study-data/route.ts", import.meta.url), "utf8");
+  assert.match(studyRoute, /Future study days are not allowed/);
+  assert.match(studyRoute, /Only today's study day can be submitted/);
+  assert.match(studyRoute, /const istToday/);
 });
 
 test("member avatars use consistent short names derived from full names", () => {
