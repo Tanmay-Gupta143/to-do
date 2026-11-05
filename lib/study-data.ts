@@ -1,6 +1,7 @@
 export type StudyTask = { id: string; title: string; completed: boolean };
 export type StudyDayRecord = { date: string; scheduled: boolean; setupStartedAt?: number; activeSeconds: number; setupComplete: boolean; submitted: boolean; submittedAt?: number; tasks: StudyTask[] };
 export type StudyStore = { records: Record<string, StudyDayRecord>; reminderTime: string; displayName: string };
+export type CalendarDayStatus = "green" | "yellow" | "red" | "none";
 
 export const EMPTY_STORE: StudyStore = { records: {}, reminderTime: "20:00", displayName: "Tanmay" };
 
@@ -17,6 +18,12 @@ export const previousDayKey = (key: string) => {
   const previous = new Date(Date.UTC(year, month - 1, day - 1));
   return `${previous.getUTCFullYear()}-${String(previous.getUTCMonth() + 1).padStart(2, "0")}-${String(previous.getUTCDate()).padStart(2, "0")}`;
 };
+export function calendarStatusFor(record: StudyDayRecord | undefined, date: string, today: string): CalendarDayStatus {
+  if (date > today) return "none";
+  if (!record?.scheduled || !record.tasks.length) return "red";
+  const done = record.tasks.filter((task) => task.completed).length;
+  return done === record.tasks.length ? "green" : done ? "yellow" : "red";
+}
 const cleanTask = (value: unknown): StudyTask | null => {
   if (!value || typeof value !== "object") return null;
   const task = value as Partial<StudyTask>;

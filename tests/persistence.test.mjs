@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { durableStore, mergeConcurrentStores, mergeStores, normalizeStore, rhythmFromStore, streakFromStore } from "../lib/study-data.ts";
+import { calendarStatusFor, durableStore, mergeConcurrentStores, mergeStores, normalizeStore, rhythmFromStore, streakFromStore } from "../lib/study-data.ts";
 
 const date = "2026-10-16";
 const task = (id, completed = false) => ({ id, title: id, completed });
@@ -67,4 +67,10 @@ test("streak calculation handles month rollover and ignores invalid record dates
   };
   assert.equal(streakFromStore(streakStore, marchFirst), 2);
   assert.equal(normalizeStore(streakStore).records["2024-02-30"], undefined);
+});
+
+test("upcoming calendar days are neutral while empty past days remain missed", () => {
+  assert.equal(calendarStatusFor(undefined, "2026-10-17", date), "none");
+  assert.equal(calendarStatusFor(undefined, "2026-10-15", date), "red");
+  assert.equal(calendarStatusFor(day([task("done", true)]), date, date), "green");
 });
