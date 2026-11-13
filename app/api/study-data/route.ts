@@ -7,7 +7,15 @@ import { durableStore, type StudyStore } from "../../../lib/study-data";
 
 export const runtime = "nodejs";
 const noStore = { "Cache-Control": "no-store, max-age=0" };
-const sameOrigin = (request: Request) => !request.headers.get("origin") || request.headers.get("origin") === new URL(request.url).origin;
+const sameOrigin = (request: Request) => {
+  const origin = request.headers.get("origin");
+  if (!origin) return true;
+  const requestOrigin = new URL(request.url).origin;
+  if (origin === requestOrigin) return true;
+  if (process.env.NODE_ENV === "production") return false;
+  const localOrigins = new Set(["http://localhost:3000", "http://127.0.0.1:3000", "http://0.0.0.0:3000"]);
+  return localOrigins.has(origin) && localOrigins.has(requestOrigin);
+};
 const istToday = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
 const authenticatedMember = async (request: Request) => {
   const session = requestSession(request);

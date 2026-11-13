@@ -14,7 +14,12 @@ const adminSession = async (request: Request) => {
 const errorResponse = (error: unknown) => NextResponse.json({ error: error instanceof Error ? error.message : "Request failed." }, { status: 400 });
 const sameOrigin = (request: Request) => {
   const origin = request.headers.get("origin");
-  return !origin || origin === new URL(request.url).origin;
+  if (!origin) return true;
+  const requestOrigin = new URL(request.url).origin;
+  if (origin === requestOrigin) return true;
+  if (process.env.NODE_ENV === "production") return false;
+  const localOrigins = new Set(["http://localhost:3000", "http://127.0.0.1:3000", "http://0.0.0.0:3000"]);
+  return localOrigins.has(origin) && localOrigins.has(requestOrigin);
 };
 
 export async function GET(request: Request) {

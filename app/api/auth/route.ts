@@ -14,7 +14,12 @@ const loginAttempts = new Map<string, { count: number; resetAt: number }>();
 const setSessionCookie = (response: NextResponse, value: string, maxAge = SESSION_AGE) => response.cookies.set({ name: COOKIE_NAME, value, httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/", maxAge });
 const sameOrigin = (request: Request) => {
   const origin = request.headers.get("origin");
-  return !origin || origin === new URL(request.url).origin;
+  if (!origin) return true;
+  const requestOrigin = new URL(request.url).origin;
+  if (origin === requestOrigin) return true;
+  if (process.env.NODE_ENV === "production") return false;
+  const localOrigins = new Set(["http://localhost:3000", "http://127.0.0.1:3000", "http://0.0.0.0:3000"]);
+  return localOrigins.has(origin) && localOrigins.has(requestOrigin);
 };
 const clientKey = (request: Request, username: string) => `${request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown"}:${username.trim().toLowerCase()}`;
 const isRateLimited = (key: string) => {

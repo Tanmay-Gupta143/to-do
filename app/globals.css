@@ -1113,6 +1113,143 @@ h3 {
   margin-bottom: 32px;
 }
 
+.profile-panel {
+  max-width: 900px;
+}
+
+.profile-intro {
+  display: flex;
+  align-items: center;
+  gap: 17px;
+  padding-bottom: 28px;
+  border-bottom: 1px solid var(--border);
+}
+
+.profile-avatar {
+  display: grid;
+  flex: 0 0 58px;
+  place-items: center;
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-size: 24px;
+  font-weight: 800;
+}
+
+.profile-intro h2 { margin-top: 6px; }
+.profile-intro p { margin-top: 7px; }
+
+.fitness-book {
+  margin-top: 32px;
+}
+
+.fitness-book-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 22px;
+  border: 1px solid #4c2a16;
+  border-radius: 7px;
+  background: linear-gradient(135deg, #1b1009, #0d0d0d 64%);
+}
+
+.fitness-book-heading h3 {
+  margin-top: 7px;
+  color: var(--foreground);
+  font-size: 25px;
+  letter-spacing: -0.04em;
+}
+
+.fitness-book-heading p {
+  margin-top: 7px;
+  color: #a18d7b;
+  font-size: 12px;
+}
+
+.fitness-tag {
+  padding: 7px 9px;
+  border: 1px solid #603719;
+  border-radius: 4px;
+  color: var(--primary);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .12em;
+}
+
+.fitness-section {
+  border-bottom: 1px solid var(--border);
+}
+
+.fitness-section summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 58px;
+  color: #ddd;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 700;
+  list-style: none;
+}
+
+.fitness-section summary::-webkit-details-marker { display: none; }
+.fitness-section summary::after { content: "+"; color: var(--primary); font-size: 20px; font-weight: 400; }
+.fitness-section[open] summary::after { content: "−"; }
+.fitness-copy { padding: 0 0 20px; color: #aaa; font-size: 12px; line-height: 1.6; }
+.fitness-copy p + p { margin-top: 11px; }
+.fitness-muted { color: #777; }
+.fitness-note { margin-top: 16px; color: #8d7b6c; font-size: 11px; line-height: 1.5; }
+
+.fitness-week {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding-bottom: 4px;
+}
+
+.fitness-week > div,
+.food-grid > div {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: #0b0b0b;
+}
+
+.fitness-week strong,
+.food-grid strong { color: #ddd; font-size: 11px; }
+.fitness-week span,
+.food-grid span { color: #888; font-size: 11px; line-height: 1.4; }
+
+.exercise-list { padding-bottom: 4px; }
+.exercise-list > div { display: flex; gap: 13px; padding: 13px 0; border-top: 1px solid #1d1d1d; }
+.exercise-list > div:first-child { border-top: 0; }
+.exercise-list b { flex: 0 0 22px; color: var(--primary); font-size: 11px; }
+.exercise-list span { display: grid; gap: 4px; }
+.exercise-list strong { color: #ddd; font-size: 12px; }
+.exercise-list small { color: #888; font-size: 11px; line-height: 1.35; }
+
+.food-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.fitness-copy ul { display: grid; gap: 8px; padding-left: 18px; }
+.fitness-copy li { padding-left: 2px; }
+.fitness-continuation { max-width: 900px; margin-top: 14px; padding: 0 28px; border: 1px solid var(--border); border-radius: 7px; background: var(--card); }
+.fitness-copy h4 { margin: 18px 0 8px; color: #ddd; font-size: 12px; }
+.fitness-copy h4:first-child { margin-top: 0; }
+.target-map { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.target-map > div { display: grid; gap: 5px; padding: 12px; border: 1px solid var(--border); border-radius: 5px; background: #0b0b0b; }
+.target-map strong { color: #ddd; font-size: 11px; }
+.target-map span, .reference-list p { color: #888; font-size: 11px; line-height: 1.5; }
+.reference-list { display: grid; gap: 11px; }
+.reference-list p { margin: 0; }
+.reference-list strong { color: #ddd; }
+.progression-example { display: grid; grid-template-columns: auto 1fr; gap: 8px 14px; margin: 12px 0; padding: 12px; border: 1px solid var(--border); border-radius: 5px; background: #0b0b0b; }
+.progression-example span { color: #888; font-size: 11px; }
+.progression-example b { color: var(--primary); font-size: 11px; }
+
 .settings-list {
   max-width: 590px;
 }
@@ -1643,6 +1780,13 @@ h3 {
     margin-top: 28px;
     padding: 19px 18px;
   }
+
+  .profile-intro { align-items: flex-start; }
+  .fitness-book-heading { flex-direction: column; gap: 14px; }
+  .fitness-week,
+  .food-grid,
+  .target-map { grid-template-columns: 1fr; }
+  .fitness-continuation { padding: 0 18px; }
 
   .calendar-toolbar h2,
   .settings-panel h2,

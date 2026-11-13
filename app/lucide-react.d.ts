@@ -4,6 +4,7 @@ declare module "lucide-react" {
   type Icon = ComponentType<SVGProps<SVGSVGElement> & { size?: number | string; strokeWidth?: number | string }>;
   export const ArrowRight: Icon;
   export const CalendarDays: Icon;
+  export const CircleUserRound: Icon;
   export const Check: Icon;
   export const Copy: Icon;
   export const LayoutDashboard: Icon;
